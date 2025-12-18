@@ -14,8 +14,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Edge Server Dashboard | Open Balena",
-  description: "Monitor and manage your Raspberry Pi devices with Open Balena",
+  title: "Edge Server Dashboard",
+  description: "Monitor and manage your Edge Server devices",
 };
 
 export default function RootLayout({

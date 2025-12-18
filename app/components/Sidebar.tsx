@@ -66,7 +66,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="border-t border-slate-800 p-4">
         <div className="text-xs text-sidebar-text">
-          <div className="font-medium text-white mb-1">Open Balena</div>
+          <div className="font-medium text-white mb-1">Edge Server Dashboard</div>
           <div className="text-slate-400">v1.0.0</div>
         </div>
       </div>
