@@ -10,12 +10,14 @@ import {
   Logs,
   Users,
   Terminal,
+  Package,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Devices', href: '/devices', icon: Server },
   { name: 'Applications', href: '/applications', icon: Activity },
+  { name: 'Images', href: '/images', icon: Package },
   { name: 'Logs', href: '/logs', icon: Logs },
   { name: 'Terminal', href: '/terminal', icon: Terminal },
   { name: 'Team', href: '/team', icon: Users },

@@ -16,6 +16,9 @@ import {
   HardDrive,
   Clock,
   Tag,
+  Package,
+  Upload,
+  MapPin,
 } from 'lucide-react';
 
 // Dummy data
@@ -27,6 +30,8 @@ const devices = [
     status: 'online' as const,
     application: 'edge-monitoring',
     deviceType: 'Raspberry Pi 4',
+    deviceTypeCategory: 'Raspberry Pi' as const,
+    currentVersion: 'v2.1.3',
     cpuUsage: 45,
     memoryUsage: 62,
     memoryTotal: 4096,
@@ -39,6 +44,7 @@ const devices = [
     tags: ['production', 'monitoring'],
     osVersion: 'balenaOS 2.98.0',
     supervisorVersion: '14.0.0',
+    venueIds: ['venue-001', 'venue-002'],
   },
   {
     id: '2',
@@ -47,6 +53,8 @@ const devices = [
     status: 'online' as const,
     application: 'edge-monitoring',
     deviceType: 'Raspberry Pi 4',
+    deviceTypeCategory: 'Raspberry Pi' as const,
+    currentVersion: 'v2.1.3',
     cpuUsage: 32,
     memoryUsage: 48,
     memoryTotal: 4096,
@@ -59,26 +67,30 @@ const devices = [
     tags: ['production', 'monitoring'],
     osVersion: 'balenaOS 2.98.0',
     supervisorVersion: '14.0.0',
+    venueIds: ['venue-003'],
   },
   {
     id: '3',
-    name: 'raspberry-pi-03',
+    name: 'compute-module-01',
     uuid: 'c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8',
     status: 'offline' as const,
     application: 'sensor-network',
-    deviceType: 'Raspberry Pi 3B+',
+    deviceType: 'Compute Module 4',
+    deviceTypeCategory: 'Compute Module' as const,
+    currentVersion: 'v1.8.2',
     cpuUsage: 0,
     memoryUsage: 0,
-    memoryTotal: 1024,
+    memoryTotal: 2048,
     memoryUsed: 0,
     storageUsage: 0,
-    storageTotal: 16,
+    storageTotal: 32,
     storageUsed: 0,
     temperature: 0,
     lastSeen: '2 hours ago',
     tags: ['testing'],
     osVersion: 'balenaOS 2.97.0',
     supervisorVersion: '13.5.0',
+    venueIds: ['venue-004', 'venue-005', 'venue-006'],
   },
   {
     id: '4',
@@ -87,6 +99,8 @@ const devices = [
     status: 'online' as const,
     application: 'sensor-network',
     deviceType: 'Raspberry Pi 4',
+    deviceTypeCategory: 'Raspberry Pi' as const,
+    currentVersion: 'v1.8.2',
     cpuUsage: 78,
     memoryUsage: 85,
     memoryTotal: 4096,
@@ -99,18 +113,21 @@ const devices = [
     tags: ['production', 'sensors'],
     osVersion: 'balenaOS 2.98.0',
     supervisorVersion: '14.0.0',
+    venueIds: ['venue-007'],
   },
   {
     id: '5',
-    name: 'raspberry-pi-05',
+    name: 'compute-module-02',
     uuid: 'e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0',
     status: 'idle' as const,
     application: 'test-app',
-    deviceType: 'Raspberry Pi 4',
+    deviceType: 'Compute Module 4',
+    deviceTypeCategory: 'Compute Module' as const,
+    currentVersion: 'v0.5.1',
     cpuUsage: 12,
     memoryUsage: 25,
-    memoryTotal: 4096,
-    memoryUsed: 1024,
+    memoryTotal: 2048,
+    memoryUsed: 512,
     storageUsage: 28,
     storageTotal: 32,
     storageUsed: 9.0,
@@ -119,15 +136,18 @@ const devices = [
     tags: ['development'],
     osVersion: 'balenaOS 2.98.0',
     supervisorVersion: '14.0.0',
+    venueIds: [],
   },
 ];
 
 type DeviceStatus = 'online' | 'offline' | 'idle';
+type DeviceTypeCategory = 'Raspberry Pi' | 'Compute Module';
 
 export default function DevicesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | 'all'>('all');
   const [applicationFilter, setApplicationFilter] = useState<string>('all');
+  const [deviceTypeFilter, setDeviceTypeFilter] = useState<DeviceTypeCategory | 'all'>('all');
 
   const applications = Array.from(new Set(devices.map(d => d.application)));
 
@@ -138,8 +158,10 @@ export default function DevicesPage() {
     const matchesStatus = statusFilter === 'all' || device.status === statusFilter;
     const matchesApplication =
       applicationFilter === 'all' || device.application === applicationFilter;
+    const matchesDeviceType =
+      deviceTypeFilter === 'all' || device.deviceTypeCategory === deviceTypeFilter;
 
-    return matchesSearch && matchesStatus && matchesApplication;
+    return matchesSearch && matchesStatus && matchesApplication && matchesDeviceType;
   });
 
   const stats = {
@@ -231,6 +253,19 @@ export default function DevicesPage() {
                 ))}
               </select>
             </div>
+
+            {/* Device Type Filter */}
+            <div className="flex items-center gap-2">
+              <select
+                value={deviceTypeFilter}
+                onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeCategory | 'all')}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              >
+                <option value="all">All Device Types</option>
+                <option value="Raspberry Pi">Raspberry Pi</option>
+                <option value="Compute Module">Compute Module</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -244,10 +279,19 @@ export default function DevicesPage() {
                     Device
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                    Type
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
                     Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                    Version
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
                     Application
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                    Venue IDs
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
                     CPU
@@ -276,7 +320,7 @@ export default function DevicesPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center">
+                    <td colSpan={11} className="px-6 py-12 text-center">
                       <Server className="mx-auto h-12 w-12 text-slate-400 mb-4" />
                       <p className="text-sm font-medium text-slate-900 dark:text-white mb-1">
                         No devices found
@@ -336,12 +380,23 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
             <div className="text-sm font-medium text-slate-900 dark:text-white">
               {device.name}
             </div>
-            <div className="text-sm text-slate-500 dark:text-slate-400">
-              {device.deviceType}
-            </div>
             <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">
               {device.uuid.substring(0, 12)}...
             </div>
+          </div>
+        </div>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <div className="flex flex-col gap-1">
+          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+            device.deviceTypeCategory === 'Raspberry Pi'
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+              : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+          }`}>
+            {device.deviceTypeCategory}
+          </span>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {device.deviceType}
           </div>
         </div>
       </td>
@@ -365,12 +420,44 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
         )}
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 text-slate-400" />
+          <span className="text-sm font-medium text-slate-900 dark:text-white">
+            {device.currentVersion}
+          </span>
+        </div>
+        <button className="mt-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 flex items-center gap-1">
+          <Upload className="h-3 w-3" />
+          Update
+        </button>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
         <div className="text-sm text-slate-900 dark:text-white">
           {device.application}
         </div>
         <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           {device.osVersion}
         </div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="flex flex-wrap gap-1">
+          {device.venueIds.length > 0 ? (
+            device.venueIds.map((venueId) => (
+              <span
+                key={venueId}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+              >
+                <MapPin className="h-3 w-3" />
+                {venueId}
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-slate-400 italic">No venues</span>
+          )}
+        </div>
+        <button className="mt-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400">
+          Manage
+        </button>
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
         {device.status === 'online' ? (

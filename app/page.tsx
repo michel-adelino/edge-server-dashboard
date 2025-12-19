@@ -14,6 +14,8 @@ import {
   AlertCircle,
   ArrowRight,
   MoreVertical,
+  Package,
+  MapPin,
 } from 'lucide-react';
 
 export default function Home() {
@@ -25,10 +27,13 @@ export default function Home() {
       uuid: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
       status: 'online',
       application: 'edge-monitoring',
+      deviceTypeCategory: 'Raspberry Pi',
+      currentVersion: 'v2.1.3',
       cpuUsage: 45,
       memoryUsage: 62,
       temperature: 52,
       lastSeen: '2 minutes ago',
+      venueIds: ['venue-001', 'venue-002'],
     },
     {
       id: '2',
@@ -36,21 +41,27 @@ export default function Home() {
       uuid: 'b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7',
       status: 'online',
       application: 'edge-monitoring',
+      deviceTypeCategory: 'Raspberry Pi',
+      currentVersion: 'v2.1.3',
       cpuUsage: 32,
       memoryUsage: 48,
       temperature: 48,
       lastSeen: '1 minute ago',
+      venueIds: ['venue-003'],
     },
     {
       id: '3',
-      name: 'raspberry-pi-03',
+      name: 'compute-module-01',
       uuid: 'c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8',
       status: 'offline',
       application: 'sensor-network',
+      deviceTypeCategory: 'Compute Module',
+      currentVersion: 'v1.8.2',
       cpuUsage: 0,
       memoryUsage: 0,
       temperature: 0,
       lastSeen: '2 hours ago',
+      venueIds: ['venue-004', 'venue-005'],
     },
     {
       id: '4',
@@ -58,21 +69,27 @@ export default function Home() {
       uuid: 'd4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9',
       status: 'online',
       application: 'sensor-network',
+      deviceTypeCategory: 'Raspberry Pi',
+      currentVersion: 'v1.8.2',
       cpuUsage: 78,
       memoryUsage: 85,
       temperature: 65,
       lastSeen: 'Just now',
+      venueIds: ['venue-007'],
     },
     {
       id: '5',
-      name: 'raspberry-pi-05',
+      name: 'compute-module-02',
       uuid: 'e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0',
       status: 'idle',
       application: 'test-app',
+      deviceTypeCategory: 'Compute Module',
+      currentVersion: 'v0.5.1',
       cpuUsage: 12,
       memoryUsage: 25,
       temperature: 42,
       lastSeen: '5 minutes ago',
+      venueIds: [],
     },
   ];
 
@@ -414,9 +431,40 @@ function DeviceRow({ device }: { device: Device }) {
             <div className="text-sm font-medium text-slate-900 dark:text-white">
               {device.name}
             </div>
-            <div className="text-sm text-slate-500 dark:text-slate-400">
-              {device.uuid.substring(0, 8)}...
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {device.uuid.substring(0, 12)}...
             </div>
+            <div className="mt-1 flex items-center gap-2">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                device.deviceTypeCategory === 'Raspberry Pi'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+              }`}>
+                {device.deviceTypeCategory}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
+                <Package className="h-3 w-3" />
+                {device.currentVersion}
+              </span>
+            </div>
+            {device.venueIds.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {device.venueIds.slice(0, 2).map((venueId) => (
+                  <span
+                    key={venueId}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+                  >
+                    <MapPin className="h-2.5 w-2.5" />
+                    {venueId}
+                  </span>
+                ))}
+                {device.venueIds.length > 2 && (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    +{device.venueIds.length - 2} more
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </td>
