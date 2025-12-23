@@ -1,9 +1,11 @@
+'use client';
+
+import { useMemo } from 'react';
 import DashboardLayout from './components/DashboardLayout';
 import {
   Server,
   Activity,
   Cpu,
-  HardDrive,
   Wifi,
   WifiOff,
   Thermometer,
@@ -16,107 +18,17 @@ import {
   MoreVertical,
   Package,
   MapPin,
+  Loader2,
 } from 'lucide-react';
+import { useDevices } from '../hooks/useDevices';
+import { useApplications } from '../hooks/useApplications';
+import { Device, Application } from '../lib/balena';
 
 export default function Home() {
-  // Mock data - will be replaced with API calls
-  const devices: Device[] = [
-    {
-      id: '1',
-      name: 'raspberry-pi-01',
-      uuid: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
-      status: 'online',
-      application: 'edge-monitoring',
-      deviceTypeCategory: 'Raspberry Pi',
-      currentVersion: 'v2.1.3',
-      cpuUsage: 45,
-      memoryUsage: 62,
-      temperature: 52,
-      lastSeen: '2 minutes ago',
-      venueIds: ['venue-001', 'venue-002'],
-    },
-    {
-      id: '2',
-      name: 'raspberry-pi-02',
-      uuid: 'b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7',
-      status: 'online',
-      application: 'edge-monitoring',
-      deviceTypeCategory: 'Raspberry Pi',
-      currentVersion: 'v2.1.3',
-      cpuUsage: 32,
-      memoryUsage: 48,
-      temperature: 48,
-      lastSeen: '1 minute ago',
-      venueIds: ['venue-003'],
-    },
-    {
-      id: '3',
-      name: 'compute-module-01',
-      uuid: 'c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8',
-      status: 'offline',
-      application: 'sensor-network',
-      deviceTypeCategory: 'Compute Module',
-      currentVersion: 'v1.8.2',
-      cpuUsage: 0,
-      memoryUsage: 0,
-      temperature: 0,
-      lastSeen: '2 hours ago',
-      venueIds: ['venue-004', 'venue-005'],
-    },
-    {
-      id: '4',
-      name: 'raspberry-pi-04',
-      uuid: 'd4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9',
-      status: 'online',
-      application: 'sensor-network',
-      deviceTypeCategory: 'Raspberry Pi',
-      currentVersion: 'v1.8.2',
-      cpuUsage: 78,
-      memoryUsage: 85,
-      temperature: 65,
-      lastSeen: 'Just now',
-      venueIds: ['venue-007'],
-    },
-    {
-      id: '5',
-      name: 'compute-module-02',
-      uuid: 'e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0',
-      status: 'idle',
-      application: 'test-app',
-      deviceTypeCategory: 'Compute Module',
-      currentVersion: 'v0.5.1',
-      cpuUsage: 12,
-      memoryUsage: 25,
-      temperature: 42,
-      lastSeen: '5 minutes ago',
-      venueIds: [],
-    },
-  ];
+  const { devices, loading: devicesLoading, error: devicesError } = useDevices();
+  const { applications, loading: appsLoading, error: appsError } = useApplications();
 
-  const applications: Application[] = [
-    {
-      id: '1',
-      name: 'edge-monitoring',
-      deviceCount: 2,
-      release: 'v2.1.3',
-      status: 'running',
-    },
-    {
-      id: '2',
-      name: 'sensor-network',
-      deviceCount: 2,
-      release: 'v1.8.2',
-      status: 'running',
-    },
-    {
-      id: '3',
-      name: 'test-app',
-      deviceCount: 1,
-      release: 'v0.5.1',
-      status: 'stopped',
-    },
-  ];
-
+  // Mock activities - will be replaced with API calls in future
   const activities: Activity[] = [
     {
       type: 'deployment',
@@ -148,22 +60,63 @@ export default function Home() {
     },
   ];
 
-  // Calculate stats from dummy data
-  const stats = {
-    totalDevices: devices.length,
-    onlineDevices: devices.filter(d => d.status === 'online').length,
-    offlineDevices: devices.filter(d => d.status === 'offline').length,
-    totalApplications: applications.length,
-    avgCpuUsage: Math.round(
-      devices.filter(d => d.status === 'online').reduce((sum, d) => sum + d.cpuUsage, 0) /
-      devices.filter(d => d.status === 'online').length || 0
-    ),
-    avgMemoryUsage: Math.round(
-      devices.filter(d => d.status === 'online').reduce((sum, d) => sum + d.memoryUsage, 0) /
-      devices.filter(d => d.status === 'online').length || 0
-    ),
-    totalStorage: 0,
-  };
+  // Calculate stats from API data
+  const stats = useMemo(() => {
+    if (!devices || !applications) {
+      return {
+        totalDevices: 0,
+        onlineDevices: 0,
+        offlineDevices: 0,
+        totalApplications: 0,
+        avgCpuUsage: 0,
+        avgMemoryUsage: 0,
+        totalStorage: 0,
+      };
+    }
+    const onlineDevices = devices.filter(d => d.status === 'online');
+    return {
+      totalDevices: devices.length,
+      onlineDevices: onlineDevices.length,
+      offlineDevices: devices.filter(d => d.status === 'offline').length,
+      totalApplications: applications.length,
+      avgCpuUsage: Math.round(
+        onlineDevices.reduce((sum, d) => sum + (d.cpuUsage || 0), 0) /
+        onlineDevices.length || 0
+      ),
+      avgMemoryUsage: Math.round(
+        onlineDevices.reduce((sum, d) => sum + (d.memoryUsage || 0), 0) /
+        onlineDevices.length || 0
+      ),
+      totalStorage: 0,
+    };
+  }, [devices, applications]);
+
+  const loading = devicesLoading || appsLoading;
+  const error = devicesError || appsError;
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+              Error Loading Dashboard
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              {error.message}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -227,7 +180,11 @@ export default function Home() {
               View all
             </button>
           </div>
-          {devices.length > 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+            </div>
+          ) : devices && devices.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-slate-50 dark:bg-slate-800/50">
@@ -259,7 +216,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {devices.map((device) => (
+                  {devices.slice(0, 5).map((device) => (
                     <DeviceRow key={device.id} device={device} />
                   ))}
                 </tbody>
@@ -295,9 +252,13 @@ export default function Home() {
                 View all
               </button>
             </div>
-            {applications.length > 0 ? (
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+              </div>
+            ) : applications && applications.length > 0 ? (
               <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                {applications.map((app) => (
+                {applications.slice(0, 3).map((app) => (
                   <ApplicationRow key={app.id} application={app} />
                 ))}
               </div>
@@ -351,26 +312,6 @@ export default function Home() {
 }
 
 // Types
-interface Device {
-  id: string;
-  name: string;
-  uuid: string;
-  status: 'online' | 'offline' | 'idle';
-  application: string;
-  cpuUsage: number;
-  memoryUsage: number;
-  temperature: number;
-  lastSeen: string;
-}
-
-interface Application {
-  id: string;
-  name: string;
-  deviceCount: number;
-  release: string;
-  status: 'running' | 'stopped';
-}
-
 interface Activity {
   type: 'deployment' | 'device' | 'update' | 'error';
   message: string;
@@ -387,7 +328,7 @@ interface StatCardProps {
   trend: string;
 }
 
-function StatCard({ title, value, icon: Icon, subtitle, trend }: StatCardProps) {
+function StatCard({ title, value, icon: Icon, subtitle }: StatCardProps) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between">
@@ -411,6 +352,10 @@ function StatCard({ title, value, icon: Icon, subtitle, trend }: StatCardProps) 
 }
 
 function DeviceRow({ device }: { device: Device }) {
+  // Ensure required properties have defaults
+  const deviceTypeCategory = device.deviceTypeCategory || 'Raspberry Pi';
+  const currentVersion = device.currentVersion || 'unknown';
+  const venueIds = device.venueIds || [];
   const statusConfig = {
     online: { icon: Wifi, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/30', label: 'Online' },
     offline: { icon: WifiOff, color: 'text-slate-400', bg: 'bg-slate-100 dark:bg-slate-800', label: 'Offline' },
@@ -436,20 +381,20 @@ function DeviceRow({ device }: { device: Device }) {
             </div>
             <div className="mt-1 flex items-center gap-2">
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                device.deviceTypeCategory === 'Raspberry Pi'
+                deviceTypeCategory === 'Raspberry Pi'
                   ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                   : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
               }`}>
-                {device.deviceTypeCategory}
+                {deviceTypeCategory}
               </span>
               <span className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
                 <Package className="h-3 w-3" />
-                {device.currentVersion}
+                {currentVersion}
               </span>
             </div>
-            {device.venueIds.length > 0 && (
+            {venueIds.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
-                {device.venueIds.slice(0, 2).map((venueId) => (
+                {venueIds.slice(0, 2).map((venueId: string) => (
                   <span
                     key={venueId}
                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
@@ -458,9 +403,9 @@ function DeviceRow({ device }: { device: Device }) {
                     {venueId}
                   </span>
                 ))}
-                {device.venueIds.length > 2 && (
+                {venueIds.length > 2 && (
                   <span className="text-xs text-slate-500 dark:text-slate-400">
-                    +{device.venueIds.length - 2} more
+                    +{venueIds.length - 2} more
                   </span>
                 )}
               </div>

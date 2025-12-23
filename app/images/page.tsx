@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   Package,
@@ -13,110 +13,42 @@ import {
   Tag,
   Download,
   Eye,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
-
-// Dummy container images data
-const containerImages = [
-  {
-    id: '1',
-    name: 'edge-server',
-    tag: 'v2.1.3',
-    repository: 'registry.example.com/edge-server',
-    size: '245MB',
-    createdAt: '2024-01-20T10:30:00Z',
-    updatedAt: '2024-01-20T10:30:00Z',
-    deviceType: 'Raspberry Pi 4',
-    status: 'available' as const,
-    deployedDevices: 2,
-  },
-  {
-    id: '2',
-    name: 'edge-server',
-    tag: 'v2.1.2',
-    repository: 'registry.example.com/edge-server',
-    size: '243MB',
-    createdAt: '2024-01-18T14:20:00Z',
-    updatedAt: '2024-01-18T14:20:00Z',
-    deviceType: 'Raspberry Pi 4',
-    status: 'available' as const,
-    deployedDevices: 0,
-  },
-  {
-    id: '3',
-    name: 'edge-server',
-    tag: 'v2.0.5',
-    repository: 'registry.example.com/edge-server',
-    size: '240MB',
-    createdAt: '2024-01-15T09:15:00Z',
-    updatedAt: '2024-01-15T09:15:00Z',
-    deviceType: 'Raspberry Pi 4',
-    status: 'available' as const,
-    deployedDevices: 0,
-  },
-  {
-    id: '4',
-    name: 'sensor-service',
-    tag: 'v1.8.2',
-    repository: 'registry.example.com/sensor-service',
-    size: '180MB',
-    createdAt: '2024-01-19T16:45:00Z',
-    updatedAt: '2024-01-19T16:45:00Z',
-    deviceType: 'Raspberry Pi 4',
-    status: 'available' as const,
-    deployedDevices: 1,
-  },
-  {
-    id: '5',
-    name: 'sensor-service',
-    tag: 'v1.8.1',
-    repository: 'registry.example.com/sensor-service',
-    size: '178MB',
-    createdAt: '2024-01-17T11:30:00Z',
-    updatedAt: '2024-01-17T11:30:00Z',
-    deviceType: 'Raspberry Pi 4',
-    status: 'available' as const,
-    deployedDevices: 0,
-  },
-  {
-    id: '6',
-    name: 'edge-server',
-    tag: 'v2.1.3',
-    repository: 'registry.example.com/edge-server',
-    size: '245MB',
-    createdAt: '2024-01-20T10:30:00Z',
-    updatedAt: '2024-01-20T10:30:00Z',
-    deviceType: 'Compute Module 4',
-    status: 'available' as const,
-    deployedDevices: 1,
-  },
-];
-
-type ImageStatus = 'available' | 'deploying' | 'failed';
+import { useReleases } from '../../hooks/useReleases';
+import { Release } from '../../lib/balena';
 
 export default function ImagesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [nameFilter, setNameFilter] = useState<string>('all');
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<string>('all');
 
-  const imageNames = Array.from(new Set(containerImages.map((img) => img.name)));
-  const deviceTypes = Array.from(new Set(containerImages.map((img) => img.deviceType)));
+  const { releases, loading, error } = useReleases();
 
-  const filteredImages = containerImages.filter((image) => {
-    const matchesSearch =
-      image.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      image.tag.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      image.repository.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesName = nameFilter === 'all' || image.name === nameFilter;
-    const matchesDeviceType = deviceTypeFilter === 'all' || image.deviceType === deviceTypeFilter;
-
-    return matchesSearch && matchesName && matchesDeviceType;
-  });
-
-  const stats = {
-    total: containerImages.length,
-    available: containerImages.filter((img) => img.status === 'available').length,
-    deployed: containerImages.reduce((sum, img) => sum + img.deployedDevices, 0),
-  };
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+              Error Loading Images
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              {error.message}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -235,7 +167,13 @@ export default function ImagesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {filteredImages.length > 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center">
+                      <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary-600" />
+                    </td>
+                  </tr>
+                ) : filteredImages.length > 0 ? (
                   filteredImages.map((image) => (
                     <ImageRow key={image.id} image={image} />
                   ))
@@ -280,7 +218,7 @@ function StatCard({
   );
 }
 
-function ImageRow({ image }: { image: typeof containerImages[0] }) {
+function ImageRow({ image }: { image: Release }) {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   Activity,
@@ -16,101 +16,35 @@ import {
   Package,
   Cpu,
   MemoryStick,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
-
-// Dummy data
-const applications = [
-  {
-    id: '1',
-    name: 'edge-monitoring',
-    slug: 'edge-monitoring',
-    deviceType: 'Raspberry Pi 4',
-    deviceCount: 2,
-    onlineDevices: 2,
-    offlineDevices: 0,
-    status: 'running' as const,
-    release: 'v2.1.3',
-    commit: 'a1b2c3d4e5f6',
-    createdAt: '2024-01-15T10:30:00Z',
-    updatedAt: '2024-01-20T14:22:00Z',
-    tags: ['production', 'monitoring'],
-    avgCpuUsage: 38,
-    avgMemoryUsage: 55,
-  },
-  {
-    id: '2',
-    name: 'sensor-network',
-    slug: 'sensor-network',
-    deviceType: 'Raspberry Pi 4',
-    deviceCount: 2,
-    onlineDevices: 1,
-    offlineDevices: 1,
-    status: 'running' as const,
-    release: 'v1.8.2',
-    commit: 'b2c3d4e5f6g7',
-    createdAt: '2024-01-10T08:15:00Z',
-    updatedAt: '2024-01-19T16:45:00Z',
-    tags: ['production', 'sensors'],
-    avgCpuUsage: 78,
-    avgMemoryUsage: 85,
-  },
-  {
-    id: '3',
-    name: 'test-app',
-    slug: 'test-app',
-    deviceType: 'Raspberry Pi 4',
-    deviceCount: 1,
-    onlineDevices: 0,
-    offlineDevices: 0,
-    status: 'stopped' as const,
-    release: 'v0.5.1',
-    commit: 'c3d4e5f6g7h8',
-    createdAt: '2024-01-05T12:00:00Z',
-    updatedAt: '2024-01-18T09:30:00Z',
-    tags: ['development'],
-    avgCpuUsage: 0,
-    avgMemoryUsage: 0,
-  },
-  {
-    id: '4',
-    name: 'iot-gateway',
-    slug: 'iot-gateway',
-    deviceType: 'Raspberry Pi 3B+',
-    deviceCount: 0,
-    onlineDevices: 0,
-    offlineDevices: 0,
-    status: 'stopped' as const,
-    release: 'v1.0.0',
-    commit: 'd4e5f6g7h8i9',
-    createdAt: '2024-01-12T15:20:00Z',
-    updatedAt: '2024-01-12T15:20:00Z',
-    tags: ['staging'],
-    avgCpuUsage: 0,
-    avgMemoryUsage: 0,
-  },
-];
-
-type ApplicationStatus = 'running' | 'stopped';
+import { useApplications } from '../../hooks/useApplications';
+import { Application } from '../../lib/balena';
 
 export default function ApplicationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ApplicationStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'running' | 'stopped' | 'all'>('all');
 
-  const filteredApplications = applications.filter((app) => {
-    const matchesSearch =
-      app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.slug.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
+  const { applications, loading, error } = useApplications();
 
-    return matchesSearch && matchesStatus;
-  });
+  const filteredApplications = useMemo(() => {
+    return applications.filter((app) => {
+      const matchesSearch =
+        app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        app.slug.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
 
-  const stats = {
+      return matchesSearch && matchesStatus;
+    });
+  }, [applications, searchQuery, statusFilter]);
+
+  const stats = useMemo(() => ({
     total: applications.length,
     running: applications.filter((a) => a.status === 'running').length,
     stopped: applications.filter((a) => a.status === 'stopped').length,
     totalDevices: applications.reduce((sum, a) => sum + a.deviceCount, 0),
-  };
+  }), [applications]);
 
   return (
     <DashboardLayout>
@@ -185,7 +119,11 @@ export default function ApplicationsPage() {
 
         {/* Applications Grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredApplications.length > 0 ? (
+          {loading ? (
+            <div className="col-span-full flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+            </div>
+          ) : filteredApplications.length > 0 ? (
             filteredApplications.map((app) => (
               <ApplicationCard key={app.id} application={app} />
             ))

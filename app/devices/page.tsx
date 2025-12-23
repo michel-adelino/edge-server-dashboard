@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   Server,
@@ -19,157 +19,57 @@ import {
   Package,
   Upload,
   MapPin,
+  Loader2,
 } from 'lucide-react';
-
-// Dummy data
-const devices = [
-  {
-    id: '1',
-    name: 'raspberry-pi-01',
-    uuid: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
-    status: 'online' as const,
-    application: 'edge-monitoring',
-    deviceType: 'Raspberry Pi 4',
-    deviceTypeCategory: 'Raspberry Pi' as const,
-    currentVersion: 'v2.1.3',
-    cpuUsage: 45,
-    memoryUsage: 62,
-    memoryTotal: 4096,
-    memoryUsed: 2539,
-    storageUsage: 68,
-    storageTotal: 32,
-    storageUsed: 21.8,
-    temperature: 52,
-    lastSeen: '2 minutes ago',
-    tags: ['production', 'monitoring'],
-    osVersion: 'balenaOS 2.98.0',
-    supervisorVersion: '14.0.0',
-    venueIds: ['venue-001', 'venue-002'],
-  },
-  {
-    id: '2',
-    name: 'raspberry-pi-02',
-    uuid: 'b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7',
-    status: 'online' as const,
-    application: 'edge-monitoring',
-    deviceType: 'Raspberry Pi 4',
-    deviceTypeCategory: 'Raspberry Pi' as const,
-    currentVersion: 'v2.1.3',
-    cpuUsage: 32,
-    memoryUsage: 48,
-    memoryTotal: 4096,
-    memoryUsed: 1966,
-    storageUsage: 45,
-    storageTotal: 32,
-    storageUsed: 14.4,
-    temperature: 48,
-    lastSeen: '1 minute ago',
-    tags: ['production', 'monitoring'],
-    osVersion: 'balenaOS 2.98.0',
-    supervisorVersion: '14.0.0',
-    venueIds: ['venue-003'],
-  },
-  {
-    id: '3',
-    name: 'compute-module-01',
-    uuid: 'c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8',
-    status: 'offline' as const,
-    application: 'sensor-network',
-    deviceType: 'Compute Module 4',
-    deviceTypeCategory: 'Compute Module' as const,
-    currentVersion: 'v1.8.2',
-    cpuUsage: 0,
-    memoryUsage: 0,
-    memoryTotal: 2048,
-    memoryUsed: 0,
-    storageUsage: 0,
-    storageTotal: 32,
-    storageUsed: 0,
-    temperature: 0,
-    lastSeen: '2 hours ago',
-    tags: ['testing'],
-    osVersion: 'balenaOS 2.97.0',
-    supervisorVersion: '13.5.0',
-    venueIds: ['venue-004', 'venue-005', 'venue-006'],
-  },
-  {
-    id: '4',
-    name: 'raspberry-pi-04',
-    uuid: 'd4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9',
-    status: 'online' as const,
-    application: 'sensor-network',
-    deviceType: 'Raspberry Pi 4',
-    deviceTypeCategory: 'Raspberry Pi' as const,
-    currentVersion: 'v1.8.2',
-    cpuUsage: 78,
-    memoryUsage: 85,
-    memoryTotal: 4096,
-    memoryUsed: 3482,
-    storageUsage: 82,
-    storageTotal: 32,
-    storageUsed: 26.2,
-    temperature: 65,
-    lastSeen: 'Just now',
-    tags: ['production', 'sensors'],
-    osVersion: 'balenaOS 2.98.0',
-    supervisorVersion: '14.0.0',
-    venueIds: ['venue-007'],
-  },
-  {
-    id: '5',
-    name: 'compute-module-02',
-    uuid: 'e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0',
-    status: 'idle' as const,
-    application: 'test-app',
-    deviceType: 'Compute Module 4',
-    deviceTypeCategory: 'Compute Module' as const,
-    currentVersion: 'v0.5.1',
-    cpuUsage: 12,
-    memoryUsage: 25,
-    memoryTotal: 2048,
-    memoryUsed: 512,
-    storageUsage: 28,
-    storageTotal: 32,
-    storageUsed: 9.0,
-    temperature: 42,
-    lastSeen: '5 minutes ago',
-    tags: ['development'],
-    osVersion: 'balenaOS 2.98.0',
-    supervisorVersion: '14.0.0',
-    venueIds: [],
-  },
-];
-
-type DeviceStatus = 'online' | 'offline' | 'idle';
-type DeviceTypeCategory = 'Raspberry Pi' | 'Compute Module';
+import { useDevices } from '../../hooks/useDevices';
+import { Device, DeviceFilters } from '../../lib/balena';
 
 export default function DevicesPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<DeviceStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'online' | 'offline' | 'idle' | 'all'>('all');
   const [applicationFilter, setApplicationFilter] = useState<string>('all');
-  const [deviceTypeFilter, setDeviceTypeFilter] = useState<DeviceTypeCategory | 'all'>('all');
+  const [deviceTypeFilter, setDeviceTypeFilter] = useState<'Raspberry Pi' | 'Compute Module' | 'all'>('all');
 
-  const applications = Array.from(new Set(devices.map(d => d.application)));
+  // Build filters for API
+  const apiFilters: DeviceFilters | undefined = useMemo(() => {
+    const filters: DeviceFilters = {};
+    if (statusFilter !== 'all') {
+      filters.status = statusFilter;
+    }
+    if (applicationFilter !== 'all') {
+      filters.application = applicationFilter;
+    }
+    if (deviceTypeFilter !== 'all') {
+      filters.deviceType = deviceTypeFilter;
+    }
+    return Object.keys(filters).length > 0 ? filters : undefined;
+  }, [statusFilter, applicationFilter, deviceTypeFilter]);
 
-  const filteredDevices = devices.filter(device => {
-    const matchesSearch =
-      device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.uuid.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || device.status === statusFilter;
-    const matchesApplication =
-      applicationFilter === 'all' || device.application === applicationFilter;
-    const matchesDeviceType =
-      deviceTypeFilter === 'all' || device.deviceTypeCategory === deviceTypeFilter;
+  const { devices, loading, error } = useDevices(apiFilters);
 
-    return matchesSearch && matchesStatus && matchesApplication && matchesDeviceType;
-  });
-
-  const stats = {
-    total: devices.length,
-    online: devices.filter(d => d.status === 'online').length,
-    offline: devices.filter(d => d.status === 'offline').length,
-    idle: devices.filter(d => d.status === 'idle').length,
-  };
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+              Error Loading Devices
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              {error.message}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -314,7 +214,13 @@ export default function DevicesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {filteredDevices.length > 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={11} className="px-6 py-12 text-center">
+                      <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary-600" />
+                    </td>
+                  </tr>
+                ) : filteredDevices.length > 0 ? (
                   filteredDevices.map((device) => (
                     <DeviceRow key={device.id} device={device} />
                   ))
