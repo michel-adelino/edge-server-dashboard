@@ -2,26 +2,56 @@
  * Application API Service
  */
 
-import { get, post, patch, del, expand } from './client';
-import { BalenaApplication, Application, CreateApplicationInput, Device } from './types';
+import { get, post, patch, del, expand, filter } from './client';
+import { BalenaApplication, Application, CreateApplicationInput, Device, ApplicationFilters } from './types';
 import { transformApplication } from './transformers';
 import { getDevices } from './devices';
 
 /**
- * Get all applications
+ * Get all applications with optional filters
  */
-export async function getApplications(): Promise<Application[]> {
-  const params = {
+export async function getApplications(filters?: ApplicationFilters): Promise<Application[]> {
+  const params: Record<string, string> = {
     $expand: expand('is_for__device_type', 'application_tag'),
     $orderby: 'app_name asc',
   };
+
+  // Apply filters
+  if (filters) {
+    const filterConditions: string[] = [];
+
+    // Note: Status filtering for applications is complex as it's derived from device status.
+    // We'll filter after fetching based on device status.
+    // Search filter can be applied via OData if needed, but for now we'll do client-side filtering.
+
+    if (filterConditions.length > 0) {
+      params.$filter = filterConditions.join(' and ');
+    }
+  }
 
   const applications = await get<BalenaApplication[]>('/application', { params });
   
   // Get all devices to calculate metrics
   const devices = await getDevices();
   
-  return applications.map((app) => transformApplication(app, devices));
+  let transformedApps = applications.map((app) => transformApplication(app, devices));
+
+  // Apply client-side filters
+  if (filters) {
+    if (filters.status) {
+      transformedApps = transformedApps.filter((app) => app.status === filters.status);
+    }
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      transformedApps = transformedApps.filter(
+        (app) =>
+          app.name.toLowerCase().includes(searchLower) ||
+          app.slug.toLowerCase().includes(searchLower)
+      );
+    }
+  }
+  
+  return transformedApps;
 }
 
 /**

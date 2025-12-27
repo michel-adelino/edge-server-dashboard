@@ -19,9 +19,49 @@ export interface AuthToken {
 
 /**
  * Login with email and password
+ * For now, accepts any email/password for testing (no database)
+ * TODO: Replace with actual API call when backend is ready
  */
 export async function login(email: string, password: string): Promise<AuthToken> {
+  // For testing: Accept any email/password combination
+  // In production, this should call the actual API
+  // Default to test auth unless explicitly disabled with NEXT_PUBLIC_USE_TEST_AUTH=false
+  const testAuthDisabled = process.env.NEXT_PUBLIC_USE_TEST_AUTH === 'false';
+  const useTestAuth = !testAuthDisabled;
+
+  if (useTestAuth) {
+    // Validate inputs
+    if (!email || !password) {
+      throw new BalenaAuthError('Email and password are required');
+    }
+
+    // Generate a mock token for testing - accept ANY email/password
+    const mockToken = `test_token_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const mockUsername = email.split('@')[0] || 'user';
+
+    const authToken: AuthToken = {
+      token: mockToken,
+      userId: 1,
+      email: email,
+      username: mockUsername,
+    };
+
+    // Store token and user info
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TOKEN_KEY, authToken.token);
+      localStorage.setItem(USER_KEY, JSON.stringify({
+        id: authToken.userId,
+        email: authToken.email,
+        username: authToken.username,
+      }));
+    }
+
+    return authToken;
+  }
+
   try {
+
+    // Real API call (when backend is available)
     const response = await fetch(getApiUrl('/login'), {
       method: 'POST',
       headers: {

@@ -35,6 +35,7 @@ export * from './applications';
 export * from './releases';
 export * from './supervisor';
 export * from './tags';
+export * from './logs';
 
 // Transformers
 export {

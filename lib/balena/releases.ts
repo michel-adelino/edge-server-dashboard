@@ -2,22 +2,35 @@
  * Release/Image API Service
  */
 
-import { get, post, expand } from './client';
-import { BalenaRelease, Release } from './types';
+import { get, post, patch, expand, filter } from './client';
+import { BalenaRelease, Release, ReleaseFilters } from './types';
 import { transformRelease } from './transformers';
 import { getDevices } from './devices';
 
 /**
- * Get all releases, optionally filtered by application
+ * Get all releases with optional filters
  */
-export async function getReleases(appId?: string): Promise<Release[]> {
+export async function getReleases(filters?: ReleaseFilters): Promise<Release[]> {
   const params: Record<string, string> = {
     $expand: expand('belongs_to__application', 'release_image'),
     $orderby: 'created_at desc',
   };
 
-  if (appId) {
-    params.$filter = `belongs_to__application/id eq ${appId}`;
+  // Apply filters
+  if (filters) {
+    const filterConditions: string[] = [];
+
+    if (filters.appId) {
+      filterConditions.push(`belongs_to__application/id eq ${filters.appId}`);
+    }
+
+    if (filters.deviceType) {
+      filterConditions.push(`belongs_to__application/device_type eq '${filters.deviceType}'`);
+    }
+
+    if (filterConditions.length > 0) {
+      params.$filter = filterConditions.join(' and ');
+    }
   }
 
   const releases = await get<BalenaRelease[]>('/release', { params });
@@ -25,12 +38,32 @@ export async function getReleases(appId?: string): Promise<Release[]> {
   // Get device counts for each release
   const devices = await getDevices();
   
-  return releases.map((release) => {
+  let transformedReleases = releases.map((release) => {
     const releaseDevices = devices.filter(
       (d) => d.currentVersion === (release.release_version || `commit-${release.commit.substring(0, 7)}`)
     );
     return transformRelease(release, releaseDevices.length);
   });
+
+  // Apply client-side filters
+  if (filters) {
+    if (filters.name) {
+      transformedReleases = transformedReleases.filter(
+        (release) => release.name.toLowerCase() === filters.name!.toLowerCase()
+      );
+    }
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      transformedReleases = transformedReleases.filter(
+        (release) =>
+          release.name.toLowerCase().includes(searchLower) ||
+          release.tag.toLowerCase().includes(searchLower) ||
+          release.repository.toLowerCase().includes(searchLower)
+      );
+    }
+  }
+  
+  return transformedReleases;
 }
 
 /**

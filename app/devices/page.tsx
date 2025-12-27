@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   Server,
@@ -11,24 +12,38 @@ import {
   Filter,
   MoreVertical,
   Thermometer,
-  Cpu,
-  MemoryStick,
-  HardDrive,
   Clock,
   Tag,
   Package,
   Upload,
   MapPin,
   Loader2,
+  Power,
+  RefreshCw,
+  Eye,
+  CheckSquare,
+  Square,
+  FileText,
 } from 'lucide-react';
 import { useDevices } from '../../hooks/useDevices';
 import { Device, DeviceFilters } from '../../lib/balena';
+import { getVenueIds, setVenueIds, getDeviceIp } from '../../lib/balena/tags';
+import { rebootDevice, shutdownDevice, triggerUpdate } from '../../lib/balena/supervisor';
+
+type DeviceStatus = 'online' | 'offline' | 'idle';
+type DeviceTypeCategory = 'Raspberry Pi' | 'Compute Module';
 
 export default function DevicesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'online' | 'offline' | 'idle' | 'all'>('all');
   const [applicationFilter, setApplicationFilter] = useState<string>('all');
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<'Raspberry Pi' | 'Compute Module' | 'all'>('all');
+  const [venueModalOpen, setVenueModalOpen] = useState(false);
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [bulkActionModalOpen, setBulkActionModalOpen] = useState(false);
+  const [bulkActionType, setBulkActionType] = useState<'reboot' | 'shutdown' | 'update' | 'move' | null>(null);
 
   // Build filters for API
   const apiFilters: DeviceFilters | undefined = useMemo(() => {
@@ -45,7 +60,128 @@ export default function DevicesPage() {
     return Object.keys(filters).length > 0 ? filters : undefined;
   }, [statusFilter, applicationFilter, deviceTypeFilter]);
 
-  const { devices, loading, error } = useDevices(apiFilters);
+  const { devices, loading, error, refetch } = useDevices(apiFilters);
+
+  // Listen for venue modal open event from DeviceRow
+  useEffect(() => {
+    const handleOpenModal = (event: Event) => {
+      const customEvent = event as CustomEvent<Device>;
+      setSelectedDevice(customEvent.detail);
+      setVenueModalOpen(true);
+    };
+    window.addEventListener('openVenueModal', handleOpenModal);
+    return () => window.removeEventListener('openVenueModal', handleOpenModal);
+  }, []);
+
+
+  const handleCloseVenueModal = () => {
+    setVenueModalOpen(false);
+    setSelectedDevice(null);
+  };
+
+  const handleSelectDevice = (deviceId: string) => {
+    const newSelected = new Set(selectedDeviceIds);
+    if (newSelected.has(deviceId)) {
+      newSelected.delete(deviceId);
+    } else {
+      newSelected.add(deviceId);
+    }
+    setSelectedDeviceIds(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedDeviceIds.size === filteredDevices.length) {
+      setSelectedDeviceIds(new Set());
+    } else {
+      setSelectedDeviceIds(new Set(filteredDevices.map((d) => d.id)));
+    }
+  };
+
+  const handleBulkAction = async (action: 'reboot' | 'shutdown' | 'update' | 'move') => {
+    if (selectedDeviceIds.size === 0) return;
+
+    setBulkActionType(action);
+    setBulkActionModalOpen(true);
+  };
+
+  const executeBulkAction = async () => {
+    if (!bulkActionType || selectedDeviceIds.size === 0) return;
+
+    setBulkActionLoading(true);
+    const selectedDevices = filteredDevices.filter((d) => selectedDeviceIds.has(d.id));
+    const onlineDevices = selectedDevices.filter((d) => d.status === 'online');
+
+    try {
+      for (const device of onlineDevices) {
+        const deviceIp = await getDeviceIp(device.id, device.uuid);
+        if (!deviceIp) continue;
+
+        switch (bulkActionType) {
+          case 'reboot':
+            await rebootDevice(deviceIp);
+            break;
+          case 'shutdown':
+            await shutdownDevice(deviceIp);
+            break;
+          case 'update':
+            await triggerUpdate(deviceIp);
+            break;
+          case 'move':
+            // Move to application - would need application selection
+            break;
+        }
+      }
+
+      alert(`Bulk ${bulkActionType} initiated for ${onlineDevices.length} device(s)`);
+      setBulkActionModalOpen(false);
+      setBulkActionType(null);
+      setSelectedDeviceIds(new Set());
+      refetch();
+    } catch (err) {
+      console.error('Bulk action failed:', err);
+      alert(`Failed to execute bulk action: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+
+  // Calculate stats from devices
+  const stats = useMemo(() => {
+    if (!devices) {
+      return { total: 0, online: 0, offline: 0, idle: 0 };
+    }
+    return {
+      total: devices.length,
+      online: devices.filter((d) => d.status === 'online').length,
+      offline: devices.filter((d) => d.status === 'offline').length,
+      idle: devices.filter((d) => d.status === 'idle').length,
+    };
+  }, [devices]);
+
+  // Get unique applications for filter
+  const applications = useMemo(() => {
+    if (!devices) return [];
+    return Array.from(new Set(devices.map((d) => d.application).filter(Boolean))).sort();
+  }, [devices]);
+
+  // Filter devices based on search and filters
+  const filteredDevices = useMemo(() => {
+    if (!devices) return [];
+    return devices.filter((device) => {
+      const matchesSearch =
+        !searchQuery ||
+        device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        device.uuid.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || device.status === statusFilter;
+      const matchesApplication =
+        applicationFilter === 'all' || device.application === applicationFilter;
+      const matchesDeviceType =
+        deviceTypeFilter === 'all' || device.deviceTypeCategory === deviceTypeFilter;
+
+      return matchesSearch && matchesStatus && matchesApplication && matchesDeviceType;
+    });
+  }, [devices, searchQuery, statusFilter, applicationFilter, deviceTypeFilter]);
 
   if (error) {
     return (
@@ -169,12 +305,69 @@ export default function DevicesPage() {
           </div>
         </div>
 
+        {/* Bulk Actions Toolbar */}
+        {selectedDeviceIds.size > 0 && (
+          <div className="rounded-lg border border-primary-200 bg-primary-50 p-4 dark:border-primary-800 dark:bg-primary-900/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-primary-900 dark:text-primary-100">
+                  {selectedDeviceIds.size} device{selectedDeviceIds.size !== 1 ? 's' : ''} selected
+                </span>
+                <button
+                  onClick={() => setSelectedDeviceIds(new Set())}
+                  className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                >
+                  Clear selection
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleBulkAction('update')}
+                  disabled={bulkActionLoading}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary-300 bg-white text-sm font-medium text-primary-700 hover:bg-primary-50 transition-colors disabled:opacity-50 dark:border-primary-700 dark:bg-slate-800 dark:text-primary-400"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Update
+                </button>
+                <button
+                  onClick={() => handleBulkAction('reboot')}
+                  disabled={bulkActionLoading}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary-300 bg-white text-sm font-medium text-primary-700 hover:bg-primary-50 transition-colors disabled:opacity-50 dark:border-primary-700 dark:bg-slate-800 dark:text-primary-400"
+                >
+                  <Power className="h-4 w-4" />
+                  Reboot
+                </button>
+                <button
+                  onClick={() => handleBulkAction('shutdown')}
+                  disabled={bulkActionLoading}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-sm font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 dark:border-red-700 dark:bg-slate-800 dark:text-red-400"
+                >
+                  <Power className="h-4 w-4" />
+                  Shutdown
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Devices Table */}
         <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 dark:bg-slate-800/50">
                 <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400 w-12">
+                    <button
+                      onClick={handleSelectAll}
+                      className="flex items-center justify-center"
+                    >
+                      {selectedDeviceIds.size === filteredDevices.length && filteredDevices.length > 0 ? (
+                        <CheckSquare className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+                      ) : (
+                        <Square className="h-5 w-5 text-slate-400" />
+                      )}
+                    </button>
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
                     Device
                   </th>
@@ -216,17 +409,22 @@ export default function DevicesPage() {
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="px-6 py-12 text-center">
+                    <td colSpan={12} className="px-6 py-12 text-center">
                       <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary-600" />
                     </td>
                   </tr>
                 ) : filteredDevices.length > 0 ? (
                   filteredDevices.map((device) => (
-                    <DeviceRow key={device.id} device={device} />
+                    <DeviceRow
+                      key={device.id}
+                      device={device}
+                      isSelected={selectedDeviceIds.has(device.id)}
+                      onSelect={() => handleSelectDevice(device.id)}
+                    />
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={11} className="px-6 py-12 text-center">
+                    <td colSpan={12} className="px-6 py-12 text-center">
                       <Server className="mx-auto h-12 w-12 text-slate-400 mb-4" />
                       <p className="text-sm font-medium text-slate-900 dark:text-white mb-1">
                         No devices found
@@ -241,6 +439,39 @@ export default function DevicesPage() {
             </table>
           </div>
         </div>
+
+        {/* Venue IDs Management Modal */}
+        {venueModalOpen && selectedDevice && (
+          <VenueModal
+            device={selectedDevice}
+            onClose={handleCloseVenueModal}
+            onSave={async (venueIds: string[]) => {
+              try {
+                await setVenueIds(selectedDevice.id, venueIds);
+                refetch();
+                handleCloseVenueModal();
+              } catch (err) {
+                console.error('Failed to save venue IDs:', err);
+                alert(`Failed to save: ${err instanceof Error ? err.message : 'Unknown error'}`);
+              }
+            }}
+          />
+        )}
+
+        {/* Bulk Action Confirmation Modal */}
+        {bulkActionModalOpen && bulkActionType && (
+          <BulkActionModal
+            action={bulkActionType}
+            deviceCount={selectedDeviceIds.size}
+            onConfirm={executeBulkAction}
+            onCancel={() => {
+              setBulkActionModalOpen(false);
+              setBulkActionType(null);
+            }}
+            loading={bulkActionLoading}
+          />
+        )}
+
       </div>
     </DashboardLayout>
   );
@@ -265,8 +496,16 @@ function StatCard({
   );
 }
 
-function DeviceRow({ device }: { device: typeof devices[0] }) {
-  const statusConfig = {
+function DeviceRow({
+  device,
+  isSelected,
+  onSelect,
+}: {
+  device: Device;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const statusConfig: Record<'online' | 'offline' | 'idle', { icon: typeof Wifi; color: string; bg: string; label: string }> = {
     online: { icon: Wifi, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/30', label: 'Online' },
     offline: { icon: WifiOff, color: 'text-slate-400', bg: 'bg-slate-100 dark:bg-slate-800', label: 'Offline' },
     idle: { icon: AlertCircle, color: 'text-yellow-500', bg: 'bg-yellow-100 dark:bg-yellow-900/30', label: 'Idle' },
@@ -276,7 +515,19 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
   const StatusIcon = config.icon;
 
   return (
-    <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+    <tr className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10' : ''}`}>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <button
+          onClick={onSelect}
+          className="flex items-center justify-center"
+        >
+          {isSelected ? (
+            <CheckSquare className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+          ) : (
+            <Square className="h-5 w-5 text-slate-400" />
+          )}
+        </button>
+      </td>
       <td className="px-6 py-4 whitespace-nowrap">
         <div className="flex items-center">
           <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
@@ -313,7 +564,7 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
         </span>
         {device.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {device.tags.map((tag) => (
+            {device.tags.map((tag: string) => (
               <span
                 key={tag}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
@@ -348,7 +599,7 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
       <td className="px-6 py-4">
         <div className="flex flex-wrap gap-1">
           {device.venueIds.length > 0 ? (
-            device.venueIds.map((venueId) => (
+            device.venueIds.map((venueId: string) => (
               <span
                 key={venueId}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
@@ -361,7 +612,13 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
             <span className="text-xs text-slate-400 italic">No venues</span>
           )}
         </div>
-        <button className="mt-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400">
+        <button 
+          onClick={() => {
+            const event = new CustomEvent('openVenueModal', { detail: device });
+            window.dispatchEvent(event);
+          }}
+          className="mt-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400"
+        >
           Manage
         </button>
       </td>
@@ -443,11 +700,383 @@ function DeviceRow({ device }: { device: typeof devices[0] }) {
         </div>
       </td>
       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-        <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-          <MoreVertical className="h-5 w-5" />
-        </button>
+        <DeviceActionsMenu device={device} />
       </td>
     </tr>
   );
 }
+
+function VenueModal({
+  device,
+  onClose,
+  onSave,
+}: {
+  device: Device;
+  onClose: () => void;
+  onSave: (venueIds: string[]) => Promise<void>;
+}) {
+  const [venueIds, setVenueIds] = useState<string[]>(device.venueIds || []);
+  const [newVenueId, setNewVenueId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Load current venue IDs
+    const loadVenueIds = async () => {
+      try {
+        const ids = await getVenueIds(device.id);
+        setVenueIds(ids);
+      } catch (err) {
+        console.error('Failed to load venue IDs:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadVenueIds();
+  }, [device.id]);
+
+  const handleAdd = () => {
+    if (newVenueId.trim() && !venueIds.includes(newVenueId.trim())) {
+      setVenueIds([...venueIds, newVenueId.trim()]);
+      setNewVenueId('');
+    }
+  };
+
+  const handleRemove = (venueId: string) => {
+    setVenueIds(venueIds.filter((id) => id !== venueId));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(venueIds);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            Manage Venue IDs
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            {device.name}
+          </p>
+        </div>
+        <div className="px-6 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+            </div>
+          ) : (
+            <>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Add Venue ID
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newVenueId}
+                    onChange={(e) => setNewVenueId(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
+                    placeholder="Enter venue ID"
+                    className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <button
+                    onClick={handleAdd}
+                    disabled={!newVenueId.trim()}
+                    className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Venue IDs ({venueIds.length})
+                </label>
+                {venueIds.length > 0 ? (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {venueIds.map((venueId) => (
+                      <div
+                        key={venueId}
+                        className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+                          <span className="text-sm font-medium text-slate-900 dark:text-white">
+                            {venueId}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleRemove(venueId)}
+                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        >
+                          <span className="text-sm">×</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-8 text-center dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      No venue IDs configured
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeviceActionsMenu({
+  device,
+}: {
+  device: Device;
+}) {
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const handleAction = async (action: string) => {
+    setMenuOpen(false);
+    setActionLoading(action);
+
+    try {
+      const deviceIp = await getDeviceIp(device.id, device.uuid);
+      if (!deviceIp) {
+        alert('Device IP not found. Please configure device IP in tags.');
+        return;
+      }
+
+      switch (action) {
+        case 'reboot':
+          await rebootDevice(deviceIp);
+          alert('Device reboot initiated');
+          break;
+        case 'shutdown':
+          await shutdownDevice(deviceIp);
+          alert('Device shutdown initiated');
+          break;
+        case 'update':
+          await triggerUpdate(deviceIp);
+          alert('Device update triggered');
+          break;
+        case 'details':
+          router.push(`/devices/${device.id}`);
+          break;
+        default:
+          break;
+      }
+    } catch (err) {
+      console.error(`Failed to ${action} device:`, err);
+      alert(`Failed to ${action} device: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setMenuOpen(!menuOpen)}
+        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1 rounded"
+        disabled={actionLoading !== null}
+      >
+        {actionLoading ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : (
+          <MoreVertical className="h-5 w-5" />
+        )}
+      </button>
+
+      {menuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div className="absolute right-0 mt-2 w-48 rounded-lg border border-slate-200 bg-white shadow-lg z-20 dark:border-slate-700 dark:bg-slate-800">
+            <div className="py-1">
+              <button
+                onClick={() => handleAction('details')}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"
+              >
+                <Eye className="h-4 w-4" />
+                View Details
+              </button>
+              <button
+                onClick={() => {
+                  router.push(`/devices/${device.id}?tab=logs`);
+                  setMenuOpen(false);
+                }}
+                disabled={device.status !== 'online'}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FileText className="h-4 w-4" />
+                View Logs
+              </button>
+              <button
+                onClick={() => {
+                  const event = new CustomEvent('openVenueModal', { detail: device });
+                  window.dispatchEvent(event);
+                  setMenuOpen(false);
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2"
+              >
+                <MapPin className="h-4 w-4" />
+                Manage Venues
+              </button>
+              <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
+              <button
+                onClick={() => handleAction('update')}
+                disabled={device.status !== 'online' || actionLoading !== null}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Trigger Update
+              </button>
+              <button
+                onClick={() => handleAction('reboot')}
+                disabled={device.status !== 'online' || actionLoading !== null}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Power className="h-4 w-4" />
+                Reboot Device
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('Are you sure you want to shutdown this device?')) {
+                    handleAction('shutdown');
+                  } else {
+                    setMenuOpen(false);
+                  }
+                }}
+                disabled={device.status !== 'online' || actionLoading !== null}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Power className="h-4 w-4" />
+                Shutdown Device
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BulkActionModal({
+  action,
+  deviceCount,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  action: 'reboot' | 'shutdown' | 'update' | 'move';
+  deviceCount: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const actionLabels = {
+    reboot: 'Reboot',
+    shutdown: 'Shutdown',
+    update: 'Trigger Update',
+    move: 'Move to Application',
+  };
+
+  const actionDescriptions = {
+    reboot: 'This will reboot the selected devices. They will come back online after restart.',
+    shutdown: 'This will shutdown the selected devices. They will need to be manually powered on.',
+    update: 'This will trigger an update check on the selected devices.',
+    move: 'This will move the selected devices to a different application.',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            {actionLabels[action]} Devices
+          </h2>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            {actionDescriptions[action]}
+          </p>
+          <p className="text-sm font-medium text-slate-900 dark:text-white">
+            {deviceCount} device{deviceCount !== 1 ? 's' : ''} will be affected.
+          </p>
+          {action === 'shutdown' && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+              <p className="text-xs text-red-600 dark:text-red-400">
+                <strong>Warning:</strong> Shutting down devices will require manual power-on to bring them back online.
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
+              action === 'shutdown'
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-primary-600 hover:bg-primary-700'
+            }`}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              `Confirm ${actionLabels[action]}`
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 

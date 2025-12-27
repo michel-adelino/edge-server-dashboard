@@ -45,6 +45,15 @@ export function handleAPIError(error: any): never {
 
     switch (status) {
       case 401:
+        // Clear authentication on 401 errors
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('balena_auth_token');
+          localStorage.removeItem('balena_user');
+          // Redirect to login if not already there
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }
         throw new BalenaAuthError(message);
       case 404:
         throw new BalenaNotFoundError(message);

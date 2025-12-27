@@ -187,3 +187,15 @@ export interface DeviceFilters {
   deviceType?: string;
 }
 
+export interface ApplicationFilters {
+  status?: 'running' | 'stopped';
+  search?: string;
+}
+
+export interface ReleaseFilters {
+  name?: string;
+  deviceType?: string;
+  appId?: string;
+  search?: string;
+}
+

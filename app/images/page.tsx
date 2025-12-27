@@ -17,14 +17,86 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useReleases } from '../../hooks/useReleases';
-import { Release } from '../../lib/balena';
+import { useDevices } from '../../hooks/useDevices';
+import { Release, ReleaseFilters, Device } from '../../lib/balena';
+import { deployReleaseToDevice } from '../../lib/balena/releases';
 
 export default function ImagesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [nameFilter, setNameFilter] = useState<string>('all');
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<string>('all');
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
+  const [selectedRelease, setSelectedRelease] = useState<Release | null>(null);
+  const [deploying, setDeploying] = useState(false);
 
-  const { releases, loading, error } = useReleases();
+  // Build filters for API
+  const apiFilters: ReleaseFilters | undefined = useMemo(() => {
+    const filters: ReleaseFilters = {};
+    if (nameFilter !== 'all') {
+      filters.name = nameFilter;
+    }
+    if (deviceTypeFilter !== 'all') {
+      filters.deviceType = deviceTypeFilter;
+    }
+    if (searchQuery) {
+      filters.search = searchQuery;
+    }
+    return Object.keys(filters).length > 0 ? filters : undefined;
+  }, [nameFilter, deviceTypeFilter, searchQuery]);
+
+  const { releases, loading, error } = useReleases(apiFilters);
+  const { devices } = useDevices();
+
+  // Releases are already filtered by the API, but we can do additional client-side filtering if needed
+  const filteredImages = useMemo(() => {
+    return releases || [];
+  }, [releases]);
+
+  // Get unique image names and device types for filters
+  const imageNames = useMemo(() => {
+    if (!releases) return [];
+    return Array.from(new Set(releases.map((r) => r.name))).sort();
+  }, [releases]);
+
+  const deviceTypes = useMemo(() => {
+    if (!releases) return [];
+    return Array.from(new Set(releases.map((r) => r.deviceType))).sort();
+  }, [releases]);
+
+  // Filter devices by selected release's device type
+  const compatibleDevices = useMemo(() => {
+    if (!selectedRelease || !devices) return [];
+    return devices.filter((d) => d.deviceType === selectedRelease.deviceType);
+  }, [selectedRelease, devices]);
+
+  const handleDeploy = async (deviceId: string) => {
+    if (!selectedRelease) return;
+
+    try {
+      setDeploying(true);
+      await deployReleaseToDevice(deviceId, selectedRelease.id);
+      setDeployModalOpen(false);
+      setSelectedRelease(null);
+      // Optionally refresh releases to update deployed counts
+      window.location.reload();
+    } catch (err) {
+      console.error('Failed to deploy release:', err);
+      alert(`Failed to deploy: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const stats = useMemo(() => {
+    if (!releases) {
+      return { total: 0, available: 0, deployed: 0 };
+    }
+    return {
+      total: releases.length,
+      available: releases.filter((img) => img.status === 'available').length,
+      deployed: releases.reduce((sum, img) => sum + img.deployedDevices, 0),
+    };
+  }, [releases]);
 
   if (error) {
     return (
@@ -194,6 +266,20 @@ export default function ImagesPage() {
             </table>
           </div>
         </div>
+
+        {/* Deploy Modal */}
+        {deployModalOpen && selectedRelease && (
+          <DeployModal
+            release={selectedRelease}
+            devices={compatibleDevices}
+            onClose={() => {
+              setDeployModalOpen(false);
+              setSelectedRelease(null);
+            }}
+            onDeploy={handleDeploy}
+            deploying={deploying}
+          />
+        )}
       </div>
     </DashboardLayout>
   );
@@ -214,6 +300,100 @@ function StatCard({
         {title}
       </p>
       <p className={`mt-2 text-2xl font-bold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function DeployModal({
+  release,
+  devices,
+  onClose,
+  onDeploy,
+  deploying,
+}: {
+  release: Release;
+  devices: Device[];
+  onClose: () => void;
+  onDeploy: (deviceId: string) => void;
+  deploying: boolean;
+}) {
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            Deploy {release.name}
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            Select a device to deploy this image to
+          </p>
+        </div>
+        <div className="px-6 py-4">
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+              Select Device
+            </label>
+            <select
+              value={selectedDeviceId}
+              onChange={(e) => setSelectedDeviceId(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            >
+              <option value="">Choose a device...</option>
+              {devices.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.name} ({device.status}) - {device.application}
+                </option>
+              ))}
+            </select>
+            {devices.length === 0 && (
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                No compatible devices found for {release.deviceType}
+              </p>
+            )}
+          </div>
+          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3">
+            <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
+              <div>
+                <span className="font-medium">Image:</span> {release.name}:{release.tag}
+              </div>
+              <div>
+                <span className="font-medium">Device Type:</span> {release.deviceType}
+              </div>
+              <div>
+                <span className="font-medium">Repository:</span> {release.repository}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={deploying}
+            className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => selectedDeviceId && onDeploy(selectedDeviceId)}
+            disabled={!selectedDeviceId || deploying}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {deploying ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Deploying...
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />
+                Deploy
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -290,6 +470,10 @@ function ImageRow({ image }: { image: Release }) {
             <Eye className="h-4 w-4" />
           </button>
           <button
+            onClick={() => {
+              setSelectedRelease(image);
+              setDeployModalOpen(true);
+            }}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition-colors"
             title="Deploy to Device"
           >

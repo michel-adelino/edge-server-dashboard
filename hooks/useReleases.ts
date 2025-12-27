@@ -1,48 +1,46 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getReleases, Release } from '../lib/balena';
+import { useState, useEffect, useCallback } from 'react';
+import { getReleases, Release, ReleaseFilters } from '../lib/balena';
 
-export function useReleases(appId?: string) {
+export function useReleases(filters?: ReleaseFilters) {
   const [releases, setReleases] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  const fetchReleases = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await getReleases(filters);
+      setReleases(data);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to fetch releases'));
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchReleases() {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await getReleases(appId);
-        if (!cancelled) {
-          setReleases(data);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err : new Error('Failed to fetch releases'));
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
+    async function fetch() {
+      await fetchReleases();
+      if (cancelled) return;
     }
 
-    fetchReleases();
+    fetch();
 
     return () => {
       cancelled = true;
     };
-  }, [appId]);
+  }, [fetchReleases]);
 
-  return { releases, loading, error, refetch: () => {
-    setLoading(true);
-    getReleases(appId)
-      .then(setReleases)
-      .catch((err) => setError(err instanceof Error ? err : new Error('Failed to fetch releases')))
-      .finally(() => setLoading(false));
-  } };
+  return {
+    releases,
+    loading,
+    error,
+    refetch: fetchReleases,
+  };
 }
 

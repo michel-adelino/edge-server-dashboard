@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   FileText,
@@ -16,91 +16,11 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from 'lucide-react';
-
-// Dummy log data
-const logs = [
-  {
-    id: '1',
-    timestamp: '2024-01-20T14:32:15Z',
-    device: 'raspberry-pi-01',
-    application: 'edge-monitoring',
-    service: 'main',
-    level: 'info' as const,
-    message: 'Application started successfully',
-    details: 'Container main started on port 8080',
-  },
-  {
-    id: '2',
-    timestamp: '2024-01-20T14:32:10Z',
-    device: 'raspberry-pi-01',
-    application: 'edge-monitoring',
-    service: 'main',
-    level: 'info' as const,
-    message: 'Connecting to database...',
-    details: 'Database connection established at mongodb://localhost:27017',
-  },
-  {
-    id: '3',
-    timestamp: '2024-01-20T14:31:45Z',
-    device: 'raspberry-pi-02',
-    application: 'edge-monitoring',
-    service: 'main',
-    level: 'warn' as const,
-    message: 'High CPU usage detected',
-    details: 'CPU usage exceeded 80% threshold for 5 minutes',
-  },
-  {
-    id: '4',
-    timestamp: '2024-01-20T14:30:20Z',
-    device: 'raspberry-pi-04',
-    application: 'sensor-network',
-    service: 'sensor-service',
-    level: 'error' as const,
-    message: 'Failed to read sensor data',
-    details: 'I2C communication error: Device not responding on address 0x48',
-  },
-  {
-    id: '5',
-    timestamp: '2024-01-20T14:29:55Z',
-    device: 'raspberry-pi-04',
-    application: 'sensor-network',
-    service: 'sensor-service',
-    level: 'info' as const,
-    message: 'Sensor calibration completed',
-    details: 'All sensors calibrated successfully',
-  },
-  {
-    id: '6',
-    timestamp: '2024-01-20T14:28:30Z',
-    device: 'raspberry-pi-01',
-    application: 'edge-monitoring',
-    service: 'main',
-    level: 'info' as const,
-    message: 'Health check passed',
-    details: 'All services are running normally',
-  },
-  {
-    id: '7',
-    timestamp: '2024-01-20T14:27:15Z',
-    device: 'raspberry-pi-02',
-    application: 'edge-monitoring',
-    service: 'main',
-    level: 'error' as const,
-    message: 'Network timeout',
-    details: 'Request to external API timed out after 30 seconds',
-  },
-  {
-    id: '8',
-    timestamp: '2024-01-20T14:26:00Z',
-    device: 'raspberry-pi-05',
-    application: 'test-app',
-    service: 'main',
-    level: 'info' as const,
-    message: 'Application deployed',
-    details: 'New release v0.5.1 deployed successfully',
-  },
-];
+import { useDevices } from '../../hooks/useDevices';
+import { getDeviceLogs, DeviceLog } from '../../lib/balena/logs';
+import { getDeviceIp } from '../../lib/balena/tags';
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
@@ -110,21 +30,85 @@ export default function LogsPage() {
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
   const [applicationFilter, setApplicationFilter] = useState<string>('all');
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
+  const [logs, setLogs] = useState<DeviceLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const devices = Array.from(new Set(logs.map((log) => log.device)));
-  const applications = Array.from(new Set(logs.map((log) => log.application)));
+  const { devices } = useDevices();
 
-  const filteredLogs = logs.filter((log) => {
-    const matchesSearch =
-      log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.details.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesLevel = levelFilter === 'all' || log.level === levelFilter;
-    const matchesDevice = deviceFilter === 'all' || log.device === deviceFilter;
-    const matchesApplication =
-      applicationFilter === 'all' || log.application === applicationFilter;
+  // Load logs from all devices
+  useEffect(() => {
+    if (!devices || devices.length === 0) {
+      setLoading(false);
+      return;
+    }
 
-    return matchesSearch && matchesLevel && matchesDevice && matchesApplication;
-  });
+    const loadAllLogs = async () => {
+      setLoading(true);
+      setError(null);
+      const allLogs: DeviceLog[] = [];
+
+      for (const device of devices) {
+        try {
+          // Get device IP from tags
+          const deviceIp = await getDeviceIp(device.id, device.uuid);
+          if (!deviceIp) {
+            console.warn(`No IP found for device ${device.name}, skipping logs`);
+            continue;
+          }
+
+          // Fetch logs from Supervisor API
+          const deviceLogs = await getDeviceLogs(deviceIp, {
+            limit: 50,
+          });
+
+          // Enrich logs with device information
+          const enrichedLogs = deviceLogs.map((log) => ({
+            ...log,
+            device: device.name,
+            deviceId: device.id,
+            application: device.application || 'unknown',
+          }));
+
+          allLogs.push(...enrichedLogs);
+        } catch (err) {
+          console.error(`Failed to load logs for device ${device.id}:`, err);
+          // Continue with other devices even if one fails
+        }
+      }
+
+      // Sort by timestamp (newest first)
+      allLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      setLogs(allLogs);
+      setLoading(false);
+    };
+
+    loadAllLogs();
+  }, [devices]);
+
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const matchesSearch =
+        log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (log.details && log.details.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesLevel = levelFilter === 'all' || log.level === levelFilter;
+      const matchesDevice = deviceFilter === 'all' || log.device === deviceFilter;
+      const matchesApplication =
+        applicationFilter === 'all' || log.application === applicationFilter;
+
+      return matchesSearch && matchesLevel && matchesDevice && matchesApplication;
+    });
+  }, [logs, searchQuery, levelFilter, deviceFilter, applicationFilter]);
+
+  const deviceNames = useMemo(() => {
+    if (!devices) return [];
+    return devices.map((d) => d.name);
+  }, [devices]);
+
+  const applicationNames = useMemo(() => {
+    return Array.from(new Set(logs.map((log) => log.application)));
+  }, [logs]);
 
   const toggleExpand = (logId: string) => {
     const newExpanded = new Set(expandedLogs);
@@ -161,7 +145,35 @@ export default function LogsPage() {
               <Download className="h-4 w-4" />
               Export
             </button>
-            <button className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+            <button
+              onClick={async () => {
+                setLoading(true);
+                // Reload logs
+                if (devices) {
+                  const allLogs: DeviceLog[] = [];
+                  for (const device of devices) {
+                    try {
+                      const deviceIp = await getDeviceIp(device.id, device.uuid);
+                      if (!deviceIp) continue;
+                      const deviceLogs = await getDeviceLogs(deviceIp, { limit: 50 });
+                      const enrichedLogs = deviceLogs.map((log) => ({
+                        ...log,
+                        device: device.name,
+                        deviceId: device.id,
+                        application: device.application || 'unknown',
+                      }));
+                      allLogs.push(...enrichedLogs);
+                    } catch (err) {
+                      console.error(`Failed to refresh logs for device ${device.id}:`, err);
+                    }
+                  }
+                  allLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                  setLogs(allLogs);
+                }
+                setLoading(false);
+              }}
+              className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
               <RefreshCw className="h-4 w-4" />
               Refresh
             </button>
@@ -228,7 +240,7 @@ export default function LogsPage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="all">All Devices</option>
-                {devices.map((device) => (
+                {deviceNames.map((device) => (
                   <option key={device} value={device}>
                     {device}
                   </option>
@@ -241,7 +253,7 @@ export default function LogsPage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="all">All Applications</option>
-                {applications.map((app) => (
+                {applicationNames.map((app) => (
                   <option key={app} value={app}>
                     {app}
                   </option>
@@ -253,7 +265,24 @@ export default function LogsPage() {
 
         {/* Logs List */}
         <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          {filteredLogs.length > 0 ? (
+          {loading ? (
+            <div className="p-12 text-center">
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary-600 mb-4" />
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Loading logs...
+              </p>
+            </div>
+          ) : error ? (
+            <div className="p-12 text-center">
+              <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+              <p className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+                Error loading logs
+              </p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                {error.message}
+              </p>
+            </div>
+          ) : filteredLogs.length > 0 ? (
             <div className="divide-y divide-slate-200 dark:divide-slate-800">
               {filteredLogs.map((log) => (
                 <LogRow

@@ -20,24 +20,30 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useApplications } from '../../hooks/useApplications';
-import { Application } from '../../lib/balena';
+import { Application, ApplicationFilters } from '../../lib/balena';
 
 export default function ApplicationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'running' | 'stopped' | 'all'>('all');
 
-  const { applications, loading, error } = useApplications();
+  // Build filters for API
+  const apiFilters: ApplicationFilters | undefined = useMemo(() => {
+    const filters: ApplicationFilters = {};
+    if (statusFilter !== 'all') {
+      filters.status = statusFilter;
+    }
+    if (searchQuery) {
+      filters.search = searchQuery;
+    }
+    return Object.keys(filters).length > 0 ? filters : undefined;
+  }, [statusFilter, searchQuery]);
 
+  const { applications, loading, error } = useApplications(apiFilters);
+
+  // Applications are already filtered by the API, but we can do additional client-side filtering if needed
   const filteredApplications = useMemo(() => {
-    return applications.filter((app) => {
-      const matchesSearch =
-        app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        app.slug.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [applications, searchQuery, statusFilter]);
+    return applications || [];
+  }, [applications]);
 
   const stats = useMemo(() => ({
     total: applications.length,
