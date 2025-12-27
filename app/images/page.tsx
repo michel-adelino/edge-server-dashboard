@@ -247,7 +247,14 @@ export default function ImagesPage() {
                   </tr>
                 ) : filteredImages.length > 0 ? (
                   filteredImages.map((image) => (
-                    <ImageRow key={image.id} image={image} />
+                    <ImageRow 
+                      key={image.id} 
+                      image={image} 
+                      onDeploy={(release) => {
+                        setSelectedRelease(release);
+                        setDeployModalOpen(true);
+                      }}
+                    />
                   ))
                 ) : (
                   <tr>
@@ -398,7 +405,13 @@ function DeployModal({
   );
 }
 
-function ImageRow({ image }: { image: Release }) {
+function ImageRow({ 
+  image, 
+  onDeploy 
+}: { 
+  image: Release;
+  onDeploy: (release: Release) => void;
+}) {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -470,10 +483,7 @@ function ImageRow({ image }: { image: Release }) {
             <Eye className="h-4 w-4" />
           </button>
           <button
-            onClick={() => {
-              setSelectedRelease(image);
-              setDeployModalOpen(true);
-            }}
+            onClick={() => onDeploy(image)}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition-colors"
             title="Deploy to Device"
           >

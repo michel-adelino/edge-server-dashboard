@@ -112,7 +112,7 @@ export default function ApplicationsPage() {
               <Filter className="h-4 w-4 text-slate-400" />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as ApplicationStatus | 'all')}
+                onChange={(e) => setStatusFilter(e.target.value as 'running' | 'stopped' | 'all')}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="all">All Status</option>
@@ -169,7 +169,7 @@ function StatCard({
   );
 }
 
-function ApplicationCard({ application }: { application: typeof applications[0] }) {
+function ApplicationCard({ application }: { application: Application }) {
   const statusConfig = {
     running: {
       icon: CheckCircle2,

@@ -34,6 +34,8 @@ export function useDeviceLogs(
     let intervalId: NodeJS.Timeout | null = null;
 
     async function fetchLogs() {
+      if (!deviceIp) return;
+      
       try {
         setError(null);
         const data = await getDeviceLogs(deviceIp, {

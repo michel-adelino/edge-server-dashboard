@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef as React } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/DashboardLayout';
 import {
@@ -25,7 +25,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { getDevice } from '../../../lib/balena/devices';
-import { getDeviceIp, getVenueIds, setVenueIds } from '../../../lib/balena/tags';
+import { getDeviceIp, getVenueIds, setVenueIds as saveVenueIds } from '../../../lib/balena/tags';
 import { getDeviceState, rebootDevice, shutdownDevice, triggerUpdate } from '../../../lib/balena/supervisor';
 import { useDeviceMetrics } from '../../../hooks/useDeviceMetrics';
 import { Device } from '../../../lib/balena';
@@ -665,7 +665,7 @@ function DeviceSettingsTab({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await setVenueIds(deviceId, venueIds);
+      await saveVenueIds(deviceId, venueIds);
       alert('Venue IDs saved successfully');
     } catch (err) {
       console.error('Failed to save venue IDs:', err);

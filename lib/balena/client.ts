@@ -44,9 +44,9 @@ export async function apiRequest<T>(
   }
 
   // Prepare headers
-  const requestHeaders: HeadersInit = {
+  const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...headers,
+    ...(headers as Record<string, string>),
   };
 
   // Add authentication token if required

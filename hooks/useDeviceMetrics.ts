@@ -34,6 +34,8 @@ export function useDeviceMetrics(
     let intervalId: NodeJS.Timeout | null = null;
 
     async function fetchMetrics() {
+      if (!deviceIp) return;
+      
       try {
         setError(null);
         const data = await getDeviceMetrics(deviceIp);

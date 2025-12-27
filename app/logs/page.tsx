@@ -334,7 +334,7 @@ function LogRow({
   isExpanded,
   onToggleExpand,
 }: {
-  log: typeof logs[0];
+  log: DeviceLog;
   isExpanded: boolean;
   onToggleExpand: () => void;
 }) {
