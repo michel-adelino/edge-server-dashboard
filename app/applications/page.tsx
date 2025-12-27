@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
 import {
   Activity,
   Server,
@@ -53,7 +52,6 @@ export default function ApplicationsPage() {
   }), [applications]);
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
@@ -146,7 +144,6 @@ export default function ApplicationsPage() {
           )}
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 

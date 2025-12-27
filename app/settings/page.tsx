@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
 import {
   Settings as SettingsIcon,
   User,
@@ -30,7 +29,6 @@ export default function SettingsPage() {
   ];
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <div>
@@ -80,7 +78,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 

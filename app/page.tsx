@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo } from 'react';
-import DashboardLayout from './components/DashboardLayout';
 import {
   Server,
   Activity,
@@ -96,30 +95,27 @@ export default function Home() {
 
   if (error) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-              Error Loading Dashboard
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-              {error.message}
-            </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-            >
-              Retry
-            </button>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+            Error Loading Dashboard
+          </h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            {error.message}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            Retry
+          </button>
         </div>
-      </DashboardLayout>
+      </div>
     );
   }
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
@@ -307,7 +303,6 @@ export default function Home() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 

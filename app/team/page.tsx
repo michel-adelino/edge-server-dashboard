@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
 import {
   Users,
   UserPlus,
@@ -94,7 +93,6 @@ export default function TeamPage() {
   };
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
@@ -224,7 +222,6 @@ export default function TeamPage() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 

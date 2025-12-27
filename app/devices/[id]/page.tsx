@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import DashboardLayout from '../../components/DashboardLayout';
 import {
   Server,
   Wifi,
@@ -121,40 +120,35 @@ export default function DeviceDetailPage() {
 
   if (loading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
-        </div>
-      </DashboardLayout>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+      </div>
     );
   }
 
   if (error || !device) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-              Device Not Found
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-              {error?.message || 'The device you are looking for does not exist.'}
-            </p>
-            <button
-              onClick={() => router.push('/devices')}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-            >
-              Back to Devices
-            </button>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+            Device Not Found
+          </h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            {error?.message || 'The device you are looking for does not exist.'}
+          </p>
+          <button
+            onClick={() => router.push('/devices')}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            Back to Devices
+          </button>
         </div>
-      </DashboardLayout>
+      </div>
     );
   }
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -238,7 +232,6 @@ export default function DeviceDetailPage() {
           )}
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 

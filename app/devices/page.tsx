@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import DashboardLayout from '../components/DashboardLayout';
 import {
   Server,
   Wifi,
@@ -60,7 +59,134 @@ export default function DevicesPage() {
     return Object.keys(filters).length > 0 ? filters : undefined;
   }, [statusFilter, applicationFilter, deviceTypeFilter]);
 
-  const { devices, loading, error, refetch } = useDevices(apiFilters);
+  const { devices: apiDevices, loading, error, refetch } = useDevices(apiFilters);
+
+  // Dummy data for when API fails
+  const dummyDevices: Device[] = useMemo(() => [
+    {
+      id: '1',
+      name: 'Edge Server 1',
+      uuid: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      status: 'online' as const,
+      application: 'Production Fleet',
+      applicationId: 'app-1',
+      deviceType: 'raspberrypi4',
+      deviceTypeCategory: 'Raspberry Pi' as const,
+      currentVersion: 'v2.1.0',
+      cpuUsage: 45,
+      memoryUsage: 62,
+      memoryTotal: 4096,
+      memoryUsed: 2540,
+      storageUsage: 38,
+      storageTotal: 64,
+      storageUsed: 24.3,
+      temperature: 52,
+      lastSeen: new Date(Date.now() - 5 * 60000).toISOString(),
+      tags: ['venue_id:venue-001', 'venue_id:venue-002'],
+      osVersion: 'BalenaOS 2.98.0',
+      supervisorVersion: '14.0.0',
+      venueIds: ['venue-001', 'venue-002'],
+    },
+    {
+      id: '2',
+      name: 'Edge Server 2',
+      uuid: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+      status: 'online' as const,
+      application: 'Production Fleet',
+      applicationId: 'app-1',
+      deviceType: 'raspberrypi4',
+      deviceTypeCategory: 'Raspberry Pi' as const,
+      currentVersion: 'v2.1.0',
+      cpuUsage: 32,
+      memoryUsage: 48,
+      memoryTotal: 4096,
+      memoryUsed: 1966,
+      storageUsage: 42,
+      storageTotal: 64,
+      storageUsed: 26.9,
+      temperature: 48,
+      lastSeen: new Date(Date.now() - 2 * 60000).toISOString(),
+      tags: ['venue_id:venue-003'],
+      osVersion: 'BalenaOS 2.98.0',
+      supervisorVersion: '14.0.0',
+      venueIds: ['venue-003'],
+    },
+    {
+      id: '3',
+      name: 'Edge Server 3',
+      uuid: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
+      status: 'offline' as const,
+      application: 'Staging Fleet',
+      applicationId: 'app-2',
+      deviceType: 'raspberry-pi-cm4',
+      deviceTypeCategory: 'Compute Module' as const,
+      currentVersion: 'v2.0.5',
+      cpuUsage: 0,
+      memoryUsage: 0,
+      memoryTotal: 4096,
+      memoryUsed: 0,
+      storageUsage: 35,
+      storageTotal: 32,
+      storageUsed: 11.2,
+      temperature: 0,
+      lastSeen: new Date(Date.now() - 24 * 60 * 60000).toISOString(),
+      tags: ['venue_id:venue-004', 'venue_id:venue-005'],
+      osVersion: 'BalenaOS 2.97.0',
+      supervisorVersion: '13.9.0',
+      venueIds: ['venue-004', 'venue-005'],
+    },
+    {
+      id: '4',
+      name: 'Edge Server 4',
+      uuid: 'd4e5f6a7-b8c9-0123-def0-234567890123',
+      status: 'idle' as const,
+      application: 'Production Fleet',
+      applicationId: 'app-1',
+      deviceType: 'raspberrypi4',
+      deviceTypeCategory: 'Raspberry Pi' as const,
+      currentVersion: 'v2.1.0',
+      cpuUsage: 12,
+      memoryUsage: 28,
+      memoryTotal: 4096,
+      memoryUsed: 1147,
+      storageUsage: 25,
+      storageTotal: 64,
+      storageUsed: 16.0,
+      temperature: 42,
+      lastSeen: new Date(Date.now() - 15 * 60000).toISOString(),
+      tags: [],
+      osVersion: 'BalenaOS 2.98.0',
+      supervisorVersion: '14.0.0',
+      venueIds: [],
+    },
+    {
+      id: '5',
+      name: 'Edge Server 5',
+      uuid: 'e5f6a7b8-c9d0-1234-ef01-345678901234',
+      status: 'online' as const,
+      application: 'Development Fleet',
+      applicationId: 'app-3',
+      deviceType: 'raspberrypi4',
+      deviceTypeCategory: 'Raspberry Pi' as const,
+      currentVersion: 'v2.2.0-beta',
+      cpuUsage: 78,
+      memoryUsage: 85,
+      memoryTotal: 4096,
+      memoryUsed: 3482,
+      storageUsage: 55,
+      storageTotal: 64,
+      storageUsed: 35.2,
+      temperature: 65,
+      lastSeen: new Date(Date.now() - 1 * 60000).toISOString(),
+      tags: ['venue_id:venue-006'],
+      osVersion: 'BalenaOS 2.99.0',
+      supervisorVersion: '14.1.0',
+      venueIds: ['venue-006'],
+    },
+  ], []);
+
+  // Use dummy data if API fails, otherwise use real data
+  const devices = error ? dummyDevices : (apiDevices || []);
 
   // Listen for venue modal open event from DeviceRow
   useEffect(() => {
@@ -183,33 +309,33 @@ export default function DevicesPage() {
     });
   }, [devices, searchQuery, statusFilter, applicationFilter, deviceTypeFilter]);
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-              Error Loading Devices
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-              {error.message}
-            </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
+  // Show warning banner if using dummy data
+  const showDummyDataWarning = error && !loading;
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
+        {/* Dummy Data Warning */}
+        {showDummyDataWarning && (
+          <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                  API Request Failed - Showing Dummy Data
+                </p>
+                <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">
+                  {error?.message || 'Unable to connect to the API. Displaying sample data for demonstration.'}
+                </p>
+              </div>
+              <button
+                onClick={() => refetch()}
+                className="rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-700 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
         {/* Page Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -473,7 +599,6 @@ export default function DevicesPage() {
         )}
 
       </div>
-    </DashboardLayout>
   );
 }
 

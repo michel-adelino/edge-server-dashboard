@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
 import {
   FileText,
   Search,
@@ -128,7 +127,6 @@ export default function LogsPage() {
   };
 
   return (
-    <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
@@ -306,7 +304,6 @@ export default function LogsPage() {
           )}
         </div>
       </div>
-    </DashboardLayout>
   );
 }
 
