@@ -6,52 +6,41 @@ import { get, post, patch, del, expand, filter } from './client';
 import { BalenaApplication, Application, CreateApplicationInput, Device, ApplicationFilters } from './types';
 import { transformApplication } from './transformers';
 import { getDevices } from './devices';
+import { getToken } from './auth';
 
 /**
  * Get all applications with optional filters
+ * Now uses Next.js API route instead of direct API calls
  */
 export async function getApplications(filters?: ApplicationFilters): Promise<Application[]> {
-  const params: Record<string, string> = {
-    $expand: expand('is_for__device_type', 'application_tag'),
-    $orderby: 'app_name asc',
-  };
-
-  // Apply filters
-  if (filters) {
-    const filterConditions: string[] = [];
-
-    // Note: Status filtering for applications is complex as it's derived from device status.
-    // We'll filter after fetching based on device status.
-    // Search filter can be applied via OData if needed, but for now we'll do client-side filtering.
-
-    if (filterConditions.length > 0) {
-      params.$filter = filterConditions.join(' and ');
-    }
+  // Build query parameters
+  const params = new URLSearchParams();
+  if (filters?.status) {
+    params.append('status', filters.status);
+  }
+  if (filters?.search) {
+    params.append('search', filters.search);
   }
 
-  const applications = await get<BalenaApplication[]>('/application', { params });
-  
-  // Get all devices to calculate metrics
-  const devices = await getDevices();
-  
-  let transformedApps = applications.map((app) => transformApplication(app, devices));
+  const queryString = params.toString();
+  const url = `/api/applications${queryString ? `?${queryString}` : ''}`;
 
-  // Apply client-side filters
-  if (filters) {
-    if (filters.status) {
-      transformedApps = transformedApps.filter((app) => app.status === filters.status);
-    }
-    if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      transformedApps = transformedApps.filter(
-        (app) =>
-          app.name.toLowerCase().includes(searchLower) ||
-          app.slug.toLowerCase().includes(searchLower)
-      );
-    }
+  // Call Next.js API route (authentication via HTTP-only cookie)
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include', // Include cookies for authentication
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to fetch applications');
   }
-  
-  return transformedApps;
+
+  const applications = await response.json();
+  return applications as Application[];
 }
 
 /**
@@ -72,20 +61,30 @@ export async function getApplication(id: string): Promise<Application> {
 
 /**
  * Create a new application
+ * Now uses Next.js API route instead of direct API calls
  */
 export async function createApplication(data: CreateApplicationInput): Promise<Application> {
-  const payload = {
-    app_name: data.name,
-    device_type: data.deviceType,
-    application_type: data.applicationType || 'microservices',
-  };
+  // Call Next.js API route (authentication via HTTP-only cookie)
+  const response = await fetch('/api/applications/create', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include', // Include cookies for authentication
+    body: JSON.stringify({
+      name: data.name,
+      deviceType: data.deviceType,
+      // applicationType: data.applicationType || 'microservices',
+    }),
+  });
 
-  const params = {
-    $expand: expand('is_for__device_type', 'application_tag'),
-  };
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to create application');
+  }
 
-  const application = await post<BalenaApplication>('/application', payload, { params });
-  return transformApplication(application);
+  const application = await response.json();
+  return application as Application;
 }
 
 /**

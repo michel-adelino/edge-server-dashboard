@@ -26,13 +26,22 @@ export async function POST(request: NextRequest) {
     // Initialize balena SDK
     const balena = getSdk({
       apiUrl: cleanApiUrl,
+      dataDirectory: false, // Use in-memory for serverless/Next.js
     });
 
-    // Logout using SDK
-    // Reference: https://docs.balena.io/reference/sdk/node-sdk/latest/#auth+logout
-    await balena.auth.logout();
+    // Try to logout using SDK (if authenticated)
+    try {
+      await balena.auth.logout();
+    } catch (error) {
+      // Ignore errors - we'll clear the cookie anyway
+      console.warn('SDK logout failed (may not be authenticated):', error);
+    }
 
-    return NextResponse.json({ success: true });
+    // Clear the HTTP-only cookie
+    const response = NextResponse.json({ success: true });
+    response.cookies.delete('balena_token');
+
+    return response;
   } catch (error: unknown) {
     console.error('Logout error:', error);
     // Even if logout fails, return success (client will clear local storage)

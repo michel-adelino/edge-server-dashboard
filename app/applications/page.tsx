@@ -17,13 +17,15 @@ import {
   MemoryStick,
   Loader2,
   AlertCircle,
+  X,
 } from 'lucide-react';
 import { useApplications } from '../../hooks/useApplications';
-import { Application, ApplicationFilters } from '../../lib/balena';
+import { Application, ApplicationFilters, createApplication } from '../../lib/balena';
 
 export default function ApplicationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'running' | 'stopped' | 'all'>('all');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Build filters for API
   const apiFilters: ApplicationFilters | undefined = useMemo(() => {
@@ -37,7 +39,7 @@ export default function ApplicationsPage() {
     return Object.keys(filters).length > 0 ? filters : undefined;
   }, [statusFilter, searchQuery]);
 
-  const { applications, loading, error } = useApplications(apiFilters);
+  const { applications, loading, error, refetch } = useApplications(apiFilters);
 
   // Applications are already filtered by the API, but we can do additional client-side filtering if needed
   const filteredApplications = useMemo(() => {
@@ -63,7 +65,10 @@ export default function ApplicationsPage() {
               Manage your applications and fleets
             </p>
           </div>
-          <button className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors">
+          <button 
+            onClick={() => setShowCreateModal(true)}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+          >
             Create Application
           </button>
         </div>
@@ -143,6 +148,17 @@ export default function ApplicationsPage() {
             </div>
           )}
         </div>
+
+        {/* Create Application Modal */}
+        {showCreateModal && (
+          <CreateApplicationModal
+            onClose={() => setShowCreateModal(false)}
+            onSuccess={() => {
+              setShowCreateModal(false);
+              refetch();
+            }}
+          />
+        )}
       </div>
   );
 }
@@ -309,6 +325,166 @@ function ApplicationCard({ application }: { application: Application }) {
           View Details
           <ArrowRight className="h-4 w-4" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+function CreateApplicationModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [deviceType, setDeviceType] = useState('raspberrypi5');
+  const [applicationType, setApplicationType] = useState('microservices');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Common device types for Balena
+  const deviceTypes = [
+    { value: 'raspberrypi5', label: 'Raspberry Pi 5' },
+    { value: 'raspberrypi4-64', label: 'Raspberry Pi 4' },
+    { value: 'raspberrypi3-64', label: 'Raspberry Pi 3' },
+    { value: 'raspberry-pi', label: 'Raspberry Pi (Generic)' },
+    { value: 'raspberrypi-cm4', label: 'Raspberry Pi Compute Module 4' },
+    { value: 'intel-nuc', label: 'Intel NUC' },
+    { value: 'jetson-nano', label: 'NVIDIA Jetson Nano' },
+    { value: 'beaglebone-black', label: 'BeagleBone Black' },
+  ];
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setCreating(true);
+
+    try {
+      await createApplication({
+        name: name.trim(),
+        deviceType,
+        // applicationType,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create application');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            Create New Application
+          </h2>
+          <button
+            onClick={onClose}
+            disabled={creating}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="px-6 py-4">
+          {error && (
+            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 dark:bg-red-900/20 dark:border-red-800">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {/* Application Name */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                Application Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="my-app"
+                required
+                disabled={creating}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:opacity-50"
+              />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Choose a unique name for your application (fleet)
+              </p>
+            </div>
+
+            {/* Device Type */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                Device Type
+              </label>
+              <select
+                value={deviceType}
+                onChange={(e) => setDeviceType(e.target.value)}
+                required
+                disabled={creating}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:opacity-50"
+              >
+                {deviceTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Application Type */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                Application Type
+              </label>
+              <select
+                value={applicationType}
+                onChange={(e) => setApplicationType(e.target.value)}
+                disabled={creating}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:opacity-50"
+              >
+                <option value="microservices">Microservices</option>
+                <option value="dockerfile">Dockerfile</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={creating}
+              className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={creating || !name.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {creating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Application'
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

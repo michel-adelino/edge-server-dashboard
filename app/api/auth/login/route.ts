@@ -37,66 +37,92 @@ export async function POST(request: NextRequest) {
 
     // Initialize balena SDK with OpenBalena API URL
     // Reference: https://docs.balena.io/reference/sdk/node-sdk/latest/#balena-sdk~getSdk
+    // Use dataDirectory: false for serverless/Next.js
     const balena = getSdk({
       apiUrl: cleanApiUrl,
+      dataDirectory: false, // Use in-memory for serverless/Next.js
     });
 
-    // Login using SDK - returns session token (string)
+    // Login using SDK
     // Reference: https://docs.balena.io/reference/sdk/node-sdk/latest/#auth+login
-    const token = await balena.auth.login({ 
+    await balena.auth.login({ 
       email, 
       password 
     });
 
-    // Get user information - make direct API call since SDK methods may vary
-    let user: { id: number; email: string; username: string };
-    try {
-      // After login, fetch user info from OpenBalena API
-      // The SDK handles authentication via cookies, so we can make a direct request
-      const userResponse = await fetch(`${cleanApiUrl}/v7/user`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        // Disable SSL verification for self-signed certs
-        // @ts-ignore - Node.js fetch option
-        rejectUnauthorized: false,
-      });
-      
-      if (userResponse.ok) {
-        const userData = await userResponse.json();
-        // Handle OData response format
-        const userObj = userData.d || userData;
-        user = {
-          id: userObj.id || 0,
-          email: userObj.email || email,
-          username: userObj.username || email.split('@')[0] || 'user',
-        };
-      } else {
-        throw new Error('Failed to get user info');
-      }
-    } catch (userError) {
-      // If getting user fails, use email to construct basic user info
-      console.warn('Could not fetch user info, using email:', userError);
-      user = {
-        id: 0,
-        email: email,
-        username: email.split('@')[0] || 'user',
-      };
+    // Get the session token after login
+    // Reference: https://docs.balena.io/reference/sdk/node-sdk/latest/#auth+getToken
+    const token = await balena.auth.getToken();
+    
+    if (!token) {
+      throw new Error('Failed to get session token after login');
     }
 
-    // Return user info and token
-    // The SDK handles session cookies internally, but we also return the token
-    // for client-side tracking
-    return NextResponse.json({
-      token,
+    // Get user information
+    let user: { id: number; email: string; username: string };
+    try {
+      // Try to get user info using SDK
+      const userInfo = await balena.auth.getUserInfo();
+      user = {
+        id: userInfo.id || 0,
+        email: userInfo.email || email,
+        username: userInfo.username || email.split('@')[0] || 'user',
+      };
+    } catch {
+      // Fallback: fetch user info directly from API
+      try {
+        const userResponse = await fetch(`${cleanApiUrl}/v7/user`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          // @ts-expect-error - Node.js fetch option
+          rejectUnauthorized: false,
+        });
+        
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          const userObj = userData.d || userData;
+          user = {
+            id: userObj.id || 0,
+            email: userObj.email || email,
+            username: userObj.username || email.split('@')[0] || 'user',
+          };
+        } else {
+          throw new Error('Failed to get user info');
+        }
+      } catch (fetchError) {
+        // If all fails, use email to construct basic user info
+        console.warn('Could not fetch user info, using email:', fetchError);
+        user = {
+          id: 0,
+          email: email,
+          username: email.split('@')[0] || 'user',
+        };
+      }
+    }
+
+    // Create response with user info
+    const response = NextResponse.json({
+      success: true,
       user: {
         id: user.id,
         email: user.email || email,
         username: user.username || email.split('@')[0] || 'user',
       },
     });
+
+    // Store token in HTTP-only cookie for security
+    response.cookies.set('balena_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      path: '/',
+    });
+
+    return response;
   } catch (error: unknown) {
     console.error('Login error:', error);
 

@@ -49,19 +49,14 @@ export async function apiRequest<T>(
     ...(headers as Record<string, string>),
   };
 
-  // Add authentication - OpenBalena uses session cookies
-  // We still check for token to verify user is logged in
+  // Authentication is handled via HTTP-only cookies
+  // We check for the authentication flag to verify user is logged in
   if (requireAuth) {
     const token = getToken();
     if (!token) {
       throw new Error('Authentication required. Please login first.');
     }
-    // OpenBalena uses session cookies, but we can also try Bearer token
-    // Some endpoints might support both
-    if (token && !token.startsWith('session_')) {
-      // If it's not a session token, try Bearer auth
-      requestHeaders['Authorization'] = `Bearer ${token}`;
-    }
+    // Token is stored in HTTP-only cookie, no need for Authorization header
   }
 
   try {

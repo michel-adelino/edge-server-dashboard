@@ -85,17 +85,17 @@ export async function login(email: string, password: string): Promise<AuthToken>
 
     const data = await response.json();
     
-    // SDK returns token and user info
+    // Token is now stored in HTTP-only cookie, we just track user info client-side
     const authToken: AuthToken = {
-      token: data.token || `session_${Date.now()}`,
+      token: 'authenticated', // Just a flag - actual token is in HTTP-only cookie
       userId: data.user?.id || 0,
       email: data.user?.email || email,
       username: data.user?.username || email.split('@')[0] || 'user',
     };
 
-    // Store token and user info
+    // Store user info (token is in HTTP-only cookie, not accessible from client)
     if (typeof window !== 'undefined') {
-      localStorage.setItem(TOKEN_KEY, authToken.token);
+      localStorage.setItem(TOKEN_KEY, 'authenticated'); // Just a flag
       localStorage.setItem(USER_KEY, JSON.stringify({
         id: authToken.userId,
         email: authToken.email,
