@@ -43,6 +43,7 @@ export default function DevicesPage() {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [bulkActionModalOpen, setBulkActionModalOpen] = useState(false);
   const [bulkActionType, setBulkActionType] = useState<'reboot' | 'shutdown' | 'update' | 'move' | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
 
   // Build filters for API
   const apiFilters: DeviceFilters | undefined = useMemo(() => {
@@ -291,6 +292,24 @@ export default function DevicesPage() {
     return Array.from(new Set(devices.map((d) => d.application).filter(Boolean))).sort();
   }, [devices]);
 
+  // Helper function to calculate uptime
+  const calculateUptime = (lastSeen: string): string => {
+    try {
+      const lastSeenDate = new Date(lastSeen);
+      const now = new Date();
+      const diffMs = now.getTime() - lastSeenDate.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      
+      if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
+      if (diffHours > 0) return `${diffHours}h ${diffMinutes}m`;
+      return `${diffMinutes}m`;
+    } catch {
+      return 'Unknown';
+    }
+  };
+
   // Filter devices based on search and filters
   const filteredDevices = useMemo(() => {
     if (!devices) return [];
@@ -298,7 +317,9 @@ export default function DevicesPage() {
       const matchesSearch =
         !searchQuery ||
         device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        device.uuid.toLowerCase().includes(searchQuery.toLowerCase());
+        device.uuid.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        device.application.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        calculateUptime(device.lastSeen).toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || device.status === statusFilter;
       const matchesApplication =
         applicationFilter === 'all' || device.application === applicationFilter;
@@ -448,6 +469,14 @@ export default function DevicesPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => setShowMoveModal(true)}
+                  disabled={bulkActionLoading}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary-300 bg-white text-sm font-medium text-primary-700 hover:bg-primary-50 transition-colors disabled:opacity-50 dark:border-primary-700 dark:bg-slate-800 dark:text-primary-400"
+                >
+                  <Activity className="h-4 w-4" />
+                  Move to Fleet
+                </button>
+                <button
                   onClick={() => handleBulkAction('update')}
                   disabled={bulkActionLoading}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary-300 bg-white text-sm font-medium text-primary-700 hover:bg-primary-50 transition-colors disabled:opacity-50 dark:border-primary-700 dark:bg-slate-800 dark:text-primary-400"
@@ -525,6 +554,9 @@ export default function DevicesPage() {
                     Temperature
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                    Uptime
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
                     Last Seen
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
@@ -595,6 +627,20 @@ export default function DevicesPage() {
               setBulkActionType(null);
             }}
             loading={bulkActionLoading}
+          />
+        )}
+
+        {/* Move to Fleet Modal */}
+        {showMoveModal && (
+          <MoveToFleetModal
+            deviceIds={Array.from(selectedDeviceIds)}
+            applications={applications}
+            onClose={() => setShowMoveModal(false)}
+            onSuccess={() => {
+              setShowMoveModal(false);
+              setSelectedDeviceIds(new Set());
+              refetch();
+            }}
           />
         )}
 
@@ -816,6 +862,31 @@ function DeviceRow({
           </div>
         ) : (
           <span className="text-sm text-slate-400">—</span>
+        )}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+        {device.status === 'online' ? (
+          <div className="flex items-center">
+            <Clock className="h-4 w-4 mr-1" />
+            {(() => {
+              try {
+                const lastSeenDate = new Date(device.lastSeen);
+                const now = new Date();
+                const diffMs = now.getTime() - lastSeenDate.getTime();
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                
+                if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
+                if (diffHours > 0) return `${diffHours}h ${diffMinutes}m`;
+                return `${diffMinutes}m`;
+              } catch {
+                return 'Unknown';
+              }
+            })()}
+          </div>
+        ) : (
+          <span className="text-slate-400">—</span>
         )}
       </td>
       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
@@ -1204,4 +1275,120 @@ function BulkActionModal({
   );
 }
 
+function MoveToFleetModal({
+  deviceIds,
+  applications,
+  onClose,
+  onSuccess,
+}: {
+  deviceIds: string[];
+  applications: Application[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [selectedAppId, setSelectedAppId] = useState('');
+  const [moving, setMoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const handleMove = async () => {
+    if (!selectedAppId) {
+      setError('Please select an application');
+      return;
+    }
+
+    setMoving(true);
+    setError(null);
+
+    try {
+      // Move each device to the selected application
+      for (const deviceId of deviceIds) {
+        const response = await fetch(`/api/devices/${deviceId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            applicationId: selectedAppId,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Failed to move device ${deviceId}`);
+        }
+      }
+
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move devices');
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            Move Devices to Fleet
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            Move {deviceIds.length} device{deviceIds.length !== 1 ? 's' : ''} to a different fleet
+          </p>
+        </div>
+        <div className="px-6 py-4">
+          {error && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+              Select Application
+            </label>
+            <select
+              value={selectedAppId}
+              onChange={(e) => setSelectedAppId(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            >
+              <option value="">Select an application...</option>
+              {applications.map((app) => (
+                <option key={app.id} value={app.id}>
+                  {app.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={moving}
+            className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleMove}
+            disabled={moving || !selectedAppId}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {moving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Moving...
+              </>
+            ) : (
+              'Move Devices'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

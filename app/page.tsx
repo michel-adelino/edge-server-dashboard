@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Server,
   Activity,
@@ -18,14 +19,25 @@ import {
   Package,
   MapPin,
   Loader2,
+  Search,
+  Plus,
+  HardDrive,
+  Bell,
 } from 'lucide-react';
 import { useDevices } from '../hooks/useDevices';
 import { useApplications } from '../hooks/useApplications';
+import { useReleasesApi } from '../hooks/useReleasesApi';
 import { Device, Application } from '../lib/balena';
+import ProvisioningKeyModal from './components/ProvisioningKeyModal';
 
 export default function Home() {
+  const router = useRouter();
   const { devices, loading: devicesLoading, error: devicesError } = useDevices();
   const { applications, loading: appsLoading, error: appsError } = useApplications();
+  const { releases } = useReleasesApi();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showProvisioningModal, setShowProvisioningModal] = useState(false);
+  const [showCreateAppModal, setShowCreateAppModal] = useState(false);
 
   // Mock activities - will be replaced with API calls in future
   const activities: Activity[] = [
@@ -70,9 +82,31 @@ export default function Home() {
         avgCpuUsage: 0,
         avgMemoryUsage: 0,
         totalStorage: 0,
+        totalStorageUsed: 0,
+        recentDeploysSuccess: 0,
+        recentDeploysFailed: 0,
+        alertsCount: 0,
       };
     }
     const onlineDevices = devices.filter(d => d.status === 'online');
+    const totalStorageUsed = devices.reduce((sum, d) => sum + (d.storageUsed || 0), 0);
+    const totalStorage = devices.reduce((sum, d) => sum + (d.storageTotal || 0), 0);
+    
+    // Calculate recent deploys (last 24 hours)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentReleases = releases?.filter(r => {
+      const createdAt = new Date(r.createdAt);
+      return createdAt >= oneDayAgo;
+    }) || [];
+    const recentDeploysSuccess = recentReleases.filter(r => r.status === 'success').length;
+    const recentDeploysFailed = recentReleases.filter(r => r.status === 'failed').length;
+    
+    // Calculate alerts (offline devices, high CPU, etc.)
+    const alertsCount = devices.filter(d => 
+      d.status === 'offline' || 
+      (d.status === 'online' && (d.cpuUsage > 90 || d.memoryUsage > 90))
+    ).length;
+    
     return {
       totalDevices: devices.length,
       onlineDevices: onlineDevices.length,
@@ -86,9 +120,32 @@ export default function Home() {
         onlineDevices.reduce((sum, d) => sum + (d.memoryUsage || 0), 0) /
         onlineDevices.length || 0
       ),
-      totalStorage: 0,
+      totalStorage: totalStorage,
+      totalStorageUsed: totalStorageUsed,
+      recentDeploysSuccess,
+      recentDeploysFailed,
+      alertsCount,
     };
-  }, [devices, applications]);
+  }, [devices, applications, releases]);
+  
+  // Filter devices and applications based on search
+  const filteredDevices = useMemo(() => {
+    if (!devices || !searchQuery) return devices || [];
+    const query = searchQuery.toLowerCase();
+    return devices.filter(d => 
+      d.name.toLowerCase().includes(query) ||
+      d.uuid.toLowerCase().includes(query) ||
+      d.application.toLowerCase().includes(query)
+    );
+  }, [devices, searchQuery]);
+  
+  const filteredApplications = useMemo(() => {
+    if (!applications || !searchQuery) return applications || [];
+    const query = searchQuery.toLowerCase();
+    return applications.filter(a => 
+      a.name.toLowerCase().includes(query)
+    );
+  }, [applications, searchQuery]);
 
   const loading = devicesLoading || appsLoading;
   const error = devicesError || appsError;
@@ -122,10 +179,40 @@ export default function Home() {
           <div>
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
               Dashboard
-        </h1>
+            </h1>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               Overview of your devices and applications
             </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/applications')}
+              className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              New Application
+            </button>
+            <button
+              onClick={() => setShowProvisioningModal(true)}
+              className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              <Plus className="h-4 w-4" />
+              Add Device
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Search */}
+        <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              placeholder="Search devices or fleets..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm placeholder-slate-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
           </div>
         </div>
 
@@ -146,6 +233,24 @@ export default function Home() {
             trend={stats.totalApplications > 0 ? '+' + stats.totalApplications : '0'}
           />
           <StatCard
+            title="Recent Deploys"
+            value={`${stats.recentDeploysSuccess + stats.recentDeploysFailed}`}
+            icon={Package}
+            subtitle={`${stats.recentDeploysSuccess} success, ${stats.recentDeploysFailed} failed`}
+            trend={`${stats.recentDeploysSuccess}/${stats.recentDeploysFailed}`}
+          />
+          <StatCard
+            title="Storage Usage"
+            value={stats.totalStorage > 0 ? `${(stats.totalStorageUsed / stats.totalStorage * 100).toFixed(0)}%` : '0%'}
+            icon={HardDrive}
+            subtitle={stats.totalStorage > 0 ? `${(stats.totalStorageUsed / 1024).toFixed(1)}GB / ${(stats.totalStorage / 1024).toFixed(1)}GB` : 'No data'}
+            trend={stats.totalStorage > 0 ? `${(stats.totalStorageUsed / 1024).toFixed(1)}GB` : '0GB'}
+          />
+        </div>
+        
+        {/* Additional Stats Row */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <StatCard
             title="CPU Usage"
             value={`${stats.avgCpuUsage}%`}
             icon={Cpu}
@@ -158,6 +263,14 @@ export default function Home() {
             icon={MemoryStick}
             subtitle="Average across devices"
             trend={stats.avgMemoryUsage > 0 ? `${stats.avgMemoryUsage}%` : '0%'}
+          />
+          <StatCard
+            title="Alerts"
+            value={stats.alertsCount.toString()}
+            icon={Bell}
+            subtitle="Devices needing attention"
+            trend={stats.alertsCount > 0 ? `${stats.alertsCount} active` : 'All clear'}
+            color={stats.alertsCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}
           />
         </div>
 
@@ -172,7 +285,10 @@ export default function Home() {
                 {stats.totalDevices} total devices
               </p>
             </div>
-            <button className="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400">
+            <button 
+              onClick={() => router.push('/devices')}
+              className="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+            >
               View all
             </button>
           </div>
@@ -180,7 +296,7 @@ export default function Home() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
             </div>
-          ) : devices && devices.length > 0 ? (
+          ) : filteredDevices && filteredDevices.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-slate-50 dark:bg-slate-800/50">
@@ -212,7 +328,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {devices.slice(0, 5).map((device) => (
+                  {filteredDevices.slice(0, 5).map((device) => (
                     <DeviceRow key={device.id} device={device} />
                   ))}
                 </tbody>
@@ -244,7 +360,10 @@ export default function Home() {
                   {stats.totalApplications} total applications
                 </p>
               </div>
-              <button className="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400">
+              <button 
+                onClick={() => router.push('/applications')}
+                className="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+              >
                 View all
               </button>
             </div>
@@ -252,9 +371,9 @@ export default function Home() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
               </div>
-            ) : applications && applications.length > 0 ? (
+            ) : filteredApplications && filteredApplications.length > 0 ? (
               <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                {applications.slice(0, 3).map((app) => (
+                {filteredApplications.slice(0, 3).map((app) => (
                   <ApplicationRow key={app.id} application={app} />
                 ))}
               </div>
@@ -302,6 +421,12 @@ export default function Home() {
             )}
           </div>
         </div>
+        
+        {/* Provisioning Key Modal */}
+        <ProvisioningKeyModal
+          isOpen={showProvisioningModal}
+          onClose={() => setShowProvisioningModal(false)}
+        />
       </div>
   );
 }
@@ -315,15 +440,17 @@ interface Activity {
 }
 
 // Components
+
 interface StatCardProps {
   title: string;
   value: string;
   icon: React.ComponentType<{ className?: string }>;
   subtitle: string;
   trend: string;
+  color?: string;
 }
 
-function StatCard({ title, value, icon: Icon, subtitle }: StatCardProps) {
+function StatCard({ title, value, icon: Icon, subtitle, trend, color }: StatCardProps) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between">
@@ -331,7 +458,7 @@ function StatCard({ title, value, icon: Icon, subtitle }: StatCardProps) {
           <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
             {title}
           </p>
-          <p className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
+          <p className={`mt-2 text-3xl font-bold ${color || 'text-slate-900 dark:text-white'}`}>
             {value}
           </p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">
@@ -339,7 +466,7 @@ function StatCard({ title, value, icon: Icon, subtitle }: StatCardProps) {
           </p>
         </div>
         <div className="rounded-lg bg-primary-100 p-3 dark:bg-primary-900/30">
-          <Icon className="h-6 w-6 text-primary-600 dark:text-primary-400" />
+          <Icon className={`h-6 w-6 ${color || 'text-primary-600 dark:text-primary-400'}`} />
         </div>
       </div>
     </div>

@@ -22,6 +22,12 @@ import {
   Power,
   RefreshCw,
   Eye,
+  Trash2,
+  Package,
+  Download,
+  Play,
+  Square,
+  Activity,
 } from 'lucide-react';
 import { getDevice } from '../../../lib/balena/devices';
 import { getDeviceIp, getVenueIds, setVenueIds as saveVenueIds } from '../../../lib/balena/tags';
@@ -40,14 +46,16 @@ export default function DeviceDetailPage() {
   const [deviceState, setDeviceState] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'metrics' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'metrics' | 'logs' | 'services' | 'settings'>('overview');
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
 
   // Check URL params for tab
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tab = urlParams.get('tab');
-    if (tab && ['overview', 'metrics', 'logs', 'settings'].includes(tab)) {
-      setActiveTab(tab as 'overview' | 'metrics' | 'logs' | 'settings');
+    if (tab && ['overview', 'metrics', 'logs', 'services', 'settings'].includes(tab)) {
+      setActiveTab(tab as 'overview' | 'metrics' | 'logs' | 'services' | 'settings');
     }
   }, []);
 
@@ -200,7 +208,7 @@ export default function DeviceDetailPage() {
         {/* Tabs */}
         <div className="border-b border-slate-200 dark:border-slate-800">
           <div className="flex gap-4">
-            {(['overview', 'metrics', 'logs', 'settings'] as const).map((tab) => (
+            {(['overview', 'metrics', 'logs', 'services', 'settings'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -227,6 +235,9 @@ export default function DeviceDetailPage() {
           {activeTab === 'logs' && (
             <DeviceLogsTab device={device} deviceIp={deviceIp} />
           )}
+          {activeTab === 'services' && (
+            <DeviceServicesTab device={device} deviceIp={deviceIp} deviceId={deviceId} />
+          )}
           {activeTab === 'settings' && (
             <DeviceSettingsTab device={device} deviceId={deviceId} />
           )}
@@ -244,6 +255,13 @@ function DeviceOverviewTab({
   deviceState: any;
   deviceIp: string | null;
 }) {
+  const router = useRouter();
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [newName, setNewName] = useState(device.name);
+  const [renaming, setRenaming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
   const statusConfig = {
     online: { icon: Wifi, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/30', label: 'Online' },
     offline: { icon: WifiOff, color: 'text-slate-400', bg: 'bg-slate-100 dark:bg-slate-800', label: 'Offline' },
@@ -253,8 +271,97 @@ function DeviceOverviewTab({
   const config = statusConfig[device.status];
   const StatusIcon = config.icon;
 
+  // Calculate uptime
+  const calculateUptime = () => {
+    try {
+      const lastSeenDate = new Date(device.lastSeen);
+      const now = new Date();
+      const diffMs = now.getTime() - lastSeenDate.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      
+      if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
+      if (diffHours > 0) return `${diffHours}h ${diffMinutes}m`;
+      return `${diffMinutes}m`;
+    } catch {
+      return 'Unknown';
+    }
+  };
+
+  const handleRename = async () => {
+    if (!newName.trim() || newName === device.name) {
+      setShowRenameModal(false);
+      return;
+    }
+
+    setRenaming(true);
+    try {
+      const response = await fetch(`/api/devices/${device.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to rename device');
+      }
+
+      setShowRenameModal(false);
+      router.refresh();
+    } catch (err) {
+      alert(`Failed to rename device: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setRemoving(true);
+    try {
+      const response = await fetch(`/api/devices/${device.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to remove device');
+      }
+
+      router.push('/devices');
+    } catch (err) {
+      alert(`Failed to remove device: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setRemoving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Action Buttons */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={() => {
+            setNewName(device.name);
+            setShowRenameModal(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          <Tag className="h-4 w-4" />
+          Rename Device
+        </button>
+        <button
+          onClick={() => setShowRemoveModal(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 bg-white text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-700 dark:bg-slate-800 dark:text-red-400 dark:hover:bg-red-900/20"
+        >
+          <Trash2 className="h-4 w-4" />
+          Remove Device
+        </button>
+      </div>
       {/* Status Card */}
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
         <div className="flex items-center justify-between">
@@ -286,9 +393,35 @@ function DeviceOverviewTab({
         <InfoCard label="Current Version" value={device.currentVersion} />
         <InfoCard label="OS Version" value={device.osVersion || 'Unknown'} />
         <InfoCard label="Supervisor Version" value={device.supervisorVersion || 'Unknown'} />
+        {device.status === 'online' && (
+          <InfoCard label="Uptime" value={calculateUptime()} />
+        )}
         <InfoCard label="Last Seen" value={device.lastSeen} />
         <InfoCard label="Device IP" value={deviceIp || 'Not configured'} />
       </div>
+
+      {/* Current Release & Services Info */}
+      {device.status === 'online' && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="text-sm font-medium text-slate-900 dark:text-white mb-3">
+            Current Release & Services
+          </h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Release</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">
+                {device.currentVersion}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Services</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">
+                View in Services tab
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Venue IDs */}
       {device.venueIds.length > 0 && (
@@ -322,6 +455,95 @@ function DeviceOverviewTab({
                 {tag}
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rename Modal */}
+      {showRenameModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Rename Device
+              </h2>
+            </div>
+            <div className="px-6 py-4">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                placeholder="Device name"
+              />
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowRenameModal(false)}
+                disabled={renaming}
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRename}
+                disabled={renaming || !newName.trim() || newName === device.name}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {renaming ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Renaming...
+                  </>
+                ) : (
+                  'Rename'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Modal */}
+      {showRemoveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Remove Device
+              </h2>
+            </div>
+            <div className="px-6 py-4">
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                Are you sure you want to remove <strong>{device.name}</strong>? This action cannot be undone.
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowRemoveModal(false)}
+                disabled={removing}
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRemove}
+                disabled={removing}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {removing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Remove Device
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -513,6 +735,24 @@ function DeviceLogsTab({ device, deviceIp }: { device: Device; deviceIp: string 
       {/* Log Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => {
+              const logText = filteredLogs.map(log => 
+                `[${log.timestamp}] [${log.level.toUpperCase()}] [${log.service}] ${log.message}`
+              ).join('\n');
+              const blob = new Blob([logText], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${device.name}-logs-${new Date().toISOString()}.txt`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            <Download className="h-4 w-4" />
+            Export Logs
+          </button>
           <select
             value={logFilter}
             onChange={(e) => setLogFilter(e.target.value as typeof logFilter)}
@@ -613,6 +853,251 @@ function DeviceLogsTab({ device, deviceIp }: { device: Device; deviceIp: string 
             <p className="text-sm text-slate-600 dark:text-slate-400">No logs available</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DeviceServicesTab({
+  device,
+  deviceIp,
+  deviceId,
+}: {
+  device: Device;
+  deviceIp: string | null;
+  deviceId: string;
+}) {
+  const [services, setServices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadServices = async () => {
+      if (!deviceIp || device.status !== 'online') {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/devices/${deviceId}/services`, {
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to load services');
+        }
+
+        const data = await response.json();
+        setServices(data);
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error('Failed to load services'));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadServices();
+  }, [deviceId, deviceIp, device.status]);
+
+  const handleServiceAction = async (serviceId: string, action: 'restart' | 'stop' | 'start') => {
+    setActionLoading(serviceId);
+    try {
+      const response = await fetch(`/api/devices/${deviceId}/services`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ serviceId, action }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to ${action} service`);
+      }
+
+      // Reload services
+      const servicesResponse = await fetch(`/api/devices/${deviceId}/services`, {
+        credentials: 'include',
+      });
+      if (servicesResponse.ok) {
+        const data = await servicesResponse.json();
+        setServices(data);
+      }
+    } catch (err) {
+      alert(`Failed to ${action} service: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (!deviceIp || device.status !== 'online') {
+    return (
+      <div className="text-center py-12">
+        <AlertCircle className="mx-auto h-12 w-12 text-slate-400 mb-4" />
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Device must be online and have IP configured to view services
+        </p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary-600 mb-4" />
+        <p className="text-sm text-slate-600 dark:text-slate-400">Loading services...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
+        <p className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+          Error loading services
+        </p>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{error.message}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 dark:bg-slate-800/50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  Service
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  Image
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  CPU Usage
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  Memory Usage
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider dark:text-slate-400">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              {services.length > 0 ? (
+                services.map((service) => (
+                  <tr key={service.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-slate-900 dark:text-white">
+                        {service.name}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <code className="text-xs font-mono text-slate-600 dark:text-slate-400">
+                        {service.image}
+                      </code>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                        service.status === 'Running' || service.status === 'running'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                      }`}>
+                        {service.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                      {service.cpuUsage > 0 ? `${service.cpuUsage}%` : '—'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                      {service.memoryUsage > 0 ? (
+                        <div>
+                          <div className="text-sm">{service.memoryUsage}MB</div>
+                          {service.memoryLimit > 0 && (
+                            <div className="text-xs text-slate-500">
+                              / {service.memoryLimit}MB
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex items-center justify-end gap-2">
+                        {service.status === 'Running' || service.status === 'running' ? (
+                          <>
+                            <button
+                              onClick={() => handleServiceAction(service.id, 'restart')}
+                              disabled={actionLoading === service.id}
+                              className="p-1.5 rounded text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:opacity-50"
+                              title="Restart service"
+                            >
+                              {actionLoading === service.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleServiceAction(service.id, 'stop')}
+                              disabled={actionLoading === service.id}
+                              className="p-1.5 rounded text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-50"
+                              title="Stop service"
+                            >
+                              {actionLoading === service.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Square className="h-4 w-4" />
+                              )}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleServiceAction(service.id, 'start')}
+                            disabled={actionLoading === service.id}
+                            className="p-1.5 rounded text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20 disabled:opacity-50"
+                            title="Start service"
+                          >
+                            {actionLoading === service.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center">
+                    <Package className="mx-auto h-12 w-12 text-slate-400 mb-4" />
+                    <p className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+                      No services found
+                    </p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Services will appear here when the device is running containers.
+                    </p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

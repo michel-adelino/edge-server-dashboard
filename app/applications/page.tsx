@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Activity,
   Server,
@@ -183,6 +184,7 @@ function StatCard({
 }
 
 function ApplicationCard({ application }: { application: Application }) {
+  const router = useRouter();
   const statusConfig = {
     running: {
       icon: CheckCircle2,
@@ -321,7 +323,10 @@ function ApplicationCard({ application }: { application: Application }) {
         <div className="text-xs text-slate-500 dark:text-slate-400">
           Updated {new Date(application.updatedAt).toLocaleDateString()}
         </div>
-        <button className="flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400">
+        <button 
+          onClick={() => router.push(`/applications/${application.id}`)}
+          className="flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+        >
           View Details
           <ArrowRight className="h-4 w-4" />
         </button>
