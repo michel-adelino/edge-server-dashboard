@@ -12,9 +12,18 @@ export {
   getToken,
   getUser,
   isAuthenticated,
+  isAuthenticatedSync,
   refreshToken,
   type AuthToken,
 } from './auth';
+
+// SDK Client (server-side only - for API routes)
+// Note: Do not import in client-side code
+// export {
+//   createBalenaSDK,
+//   getBalenaSDK,
+//   resetBalenaSDK,
+// } from './sdk-client';
 
 // Client
 export {

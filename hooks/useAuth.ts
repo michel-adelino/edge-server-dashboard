@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { login, logout, isAuthenticated, getUser, AuthToken } from '../lib/balena';
+import { login, logout, isAuthenticatedSync, getUser, AuthToken } from '../lib/balena';
 
 export function useAuth() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -14,7 +14,7 @@ export function useAuth() {
 
   async function checkAuth() {
     try {
-      const isAuth = isAuthenticated();
+      const isAuth = isAuthenticatedSync();
       const userData = getUser();
       setAuthenticated(isAuth);
       setUser(userData);

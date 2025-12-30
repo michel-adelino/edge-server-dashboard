@@ -1,10 +1,12 @@
 /**
  * Balena API Authentication Service
- * Handles session-based authentication
+ * 
+ * Uses Next.js API routes which utilize balena-sdk server-side.
+ * This follows the proper pattern: SDK on server, API routes for client.
+ * 
+ * Reference: https://docs.balena.io/reference/sdk/node-sdk/latest/
  */
 
-import { getApiUrl } from './config';
-import { BalenaAuthResponse } from './types';
 import { BalenaAuthError, handleAPIError } from './errors';
 
 const TOKEN_KEY = 'balena_auth_token';
@@ -18,24 +20,19 @@ export interface AuthToken {
 }
 
 /**
- * Login with email and password
- * For now, accepts any email/password for testing (no database)
- * TODO: Replace with actual API call when backend is ready
+ * Login with email and password using balena-sdk
  */
 export async function login(email: string, password: string): Promise<AuthToken> {
-  // For testing: Accept any email/password combination
-  // In production, this should call the actual API
-  // Default to test auth unless explicitly disabled with NEXT_PUBLIC_USE_TEST_AUTH=false
-  const testAuthDisabled = process.env.NEXT_PUBLIC_USE_TEST_AUTH === 'false';
-  const useTestAuth = !testAuthDisabled;
+  // Validate inputs
+  if (!email || !password) {
+    throw new BalenaAuthError('Email and password are required');
+  }
 
+  // For testing: Allow test auth if explicitly enabled
+  const useTestAuth = process.env.NEXT_PUBLIC_USE_TEST_AUTH === 'true';
+  
   if (useTestAuth) {
-    // Validate inputs
-    if (!email || !password) {
-      throw new BalenaAuthError('Email and password are required');
-    }
-
-    // Generate a mock token for testing - accept ANY email/password
+    // Generate a mock token for testing
     const mockToken = `test_token_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const mockUsername = email.split('@')[0] || 'user';
 
@@ -60,13 +57,13 @@ export async function login(email: string, password: string): Promise<AuthToken>
   }
 
   try {
-
-    // Real API call (when backend is available)
-    const response = await fetch(getApiUrl('/login'), {
+    // Call Next.js API route which uses balena-sdk server-side
+    const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({
         email,
         password,
@@ -74,19 +71,26 @@ export async function login(email: string, password: string): Promise<AuthToken>
     });
 
     if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || response.statusText;
+      
       if (response.status === 401) {
         throw new BalenaAuthError('Invalid email or password');
       }
-      throw new Error(`Login failed: ${response.statusText}`);
+      if (response.status === 403) {
+        throw new BalenaAuthError('Access forbidden. Please check your credentials.');
+      }
+      throw new BalenaAuthError(errorMessage);
     }
 
-    const data: BalenaAuthResponse = await response.json();
-
+    const data = await response.json();
+    
+    // SDK returns token and user info
     const authToken: AuthToken = {
-      token: data.token,
-      userId: data.id,
-      email: data.email,
-      username: data.username,
+      token: data.token || `session_${Date.now()}`,
+      userId: data.user?.id || 0,
+      email: data.user?.email || email,
+      username: data.user?.username || email.split('@')[0] || 'user',
     };
 
     // Store token and user info
@@ -100,7 +104,26 @@ export async function login(email: string, password: string): Promise<AuthToken>
     }
 
     return authToken;
-  } catch (error) {
+  } catch (error: unknown) {
+    // Clear any stored auth on error
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    }
+    
+    // Handle specific error messages
+    if (error instanceof Error) {
+      if (error.message.includes('401') || error.message.includes('Invalid')) {
+        throw new BalenaAuthError('Invalid email or password');
+      }
+      if (error.message.includes('403') || error.message.includes('Forbidden')) {
+        throw new BalenaAuthError('Access forbidden. Please check your credentials.');
+      }
+      if (error instanceof BalenaAuthError) {
+        throw error;
+      }
+    }
+    
     handleAPIError(error);
     throw error;
   }
@@ -110,9 +133,22 @@ export async function login(email: string, password: string): Promise<AuthToken>
  * Logout and clear stored credentials
  */
 export async function logout(): Promise<void> {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+  try {
+    // Call Next.js API route which uses balena-sdk server-side
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {
+      // Ignore errors - we'll clear local storage anyway
+    });
+  } catch {
+    // Ignore errors - we'll clear local storage anyway
+  } finally {
+    // Always clear local storage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    }
   }
 }
 
@@ -147,7 +183,14 @@ export function getUser(): { id: number; email: string; username: string } | nul
 /**
  * Check if user is authenticated
  */
-export function isAuthenticated(): boolean {
+export async function isAuthenticated(): Promise<boolean> {
+  return isAuthenticatedSync();
+}
+
+/**
+ * Synchronous check for authentication (uses token only)
+ */
+export function isAuthenticatedSync(): boolean {
   return getToken() !== null;
 }
 

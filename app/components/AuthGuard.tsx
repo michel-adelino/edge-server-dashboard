@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { isAuthenticated } from '../../lib/balena/auth';
+import { isAuthenticatedSync } from '../../lib/balena/auth';
 import { Loader2 } from 'lucide-react';
 
 interface AuthGuardProps {
@@ -17,7 +17,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
 
   useEffect(() => {
     const checkAuth = () => {
-      const isAuth = isAuthenticated();
+      const isAuth = isAuthenticatedSync();
       setAuthenticated(isAuth);
 
       // Don't redirect if already on login page

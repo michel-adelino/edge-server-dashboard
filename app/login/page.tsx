@@ -96,10 +96,10 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Test Credentials Hint */}
+            {/* Info Hint */}
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
               <p className="text-xs text-slate-600 dark:text-slate-400">
-                <strong>Test Credentials:</strong> Use any email and password to login
+                <strong>Note:</strong> Use your OpenBalena account credentials to login
               </p>
             </div>
 
