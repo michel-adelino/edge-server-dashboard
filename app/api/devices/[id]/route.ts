@@ -27,11 +27,13 @@ export async function GET(
 
     return NextResponse.json({
       id: device.id.toString(),
-      name: device.device_name || device.name,
+      name: device.device_name || 'Unknown',
       uuid: device.uuid,
       status: device.is_online ? 'online' : 'offline',
-      application: device.belongs_to__application?.app_name || 'Unassigned',
-      applicationId: device.belongs_to__application?.id?.toString(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      application: (device.belongs_to__application as any)?.app_name || 'Unassigned',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      applicationId: (device.belongs_to__application as any)?.id?.toString(),
     });
   } catch (error: unknown) {
     console.error('Get device error:', error);

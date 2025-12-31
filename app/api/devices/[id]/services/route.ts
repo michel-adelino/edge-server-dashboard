@@ -4,9 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk } from '../../../../lib/balena/sdk-auth';
-import { getDeviceIp } from '../../../../lib/balena/tags';
-import { getSupervisorUrl } from '../../../../lib/balena/config';
+import { getAuthenticatedSdk } from '../../../../../lib/balena/sdk-auth';
+import { getDeviceIp } from '../../../../../lib/balena/tags';
+import { getSupervisorUrl } from '../../../../../lib/balena/config';
 
 export async function GET(
   request: NextRequest,
@@ -38,7 +38,7 @@ export async function GET(
     // Get services from Supervisor API
     // Supervisor API endpoint for services: /v1/apps/{appId}/services
     // We need to get the app ID from the device
-    const appId = device.belongs_to__application?.id;
+    const appId = device.belongs_to__application?.__id;
     
     if (!appId) {
       return NextResponse.json(
@@ -70,6 +70,7 @@ export async function GET(
           // Extract services from state if available
           const services = state.services || state.local?.services || [];
           
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return NextResponse.json(services.map((s: any, index: number) => ({
             id: s.service_id || s.id || index.toString(),
             name: s.service_name || s.name || `service-${index}`,
@@ -87,6 +88,7 @@ export async function GET(
       const services = await response.json();
       
       // Transform services to match expected format
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transformedServices = (Array.isArray(services) ? services : services.services || []).map((s: any, index: number) => ({
         id: s.service_id || s.id || index.toString(),
         name: s.service_name || s.name || `service-${index}`,
@@ -121,8 +123,7 @@ export async function POST(
 ) {
   try {
     const deviceId = params.id;
-    const body = await request.json();
-    const { serviceId, action } = body; // action: 'restart' | 'stop' | 'start'
+    const { serviceId, action } = await request.json(); // action: 'restart' | 'stop' | 'start'
     
     if (!deviceId || !serviceId || !action) {
       return NextResponse.json(
@@ -144,7 +145,7 @@ export async function POST(
       );
     }
 
-    const appId = device.belongs_to__application?.id;
+    const appId = device.belongs_to__application?.__id;
     
     if (!appId) {
       return NextResponse.json(

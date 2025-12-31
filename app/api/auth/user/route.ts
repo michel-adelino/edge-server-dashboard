@@ -3,10 +3,10 @@
  * Server-side only - uses authenticated SDK instance
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk } from '../../../lib/balena/sdk-auth';
+import { NextResponse } from 'next/server';
+import { getAuthenticatedSdk } from '../../../../lib/balena/sdk-auth';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Get authenticated SDK instance (uses token from HTTP-only cookie)
     const balena = await getAuthenticatedSdk();

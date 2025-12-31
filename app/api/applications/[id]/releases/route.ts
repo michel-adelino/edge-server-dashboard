@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk, getApiUrl } from '../../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk, getApiUrl } from '../../../../../lib/balena/sdk-auth';
 
 export async function GET(
   request: NextRequest,
@@ -29,9 +29,11 @@ export async function GET(
       url: `${apiUrl}/v7/release?$filter=belongs_to__application/id eq ${applicationId}&$orderby=created_at desc&$expand=belongs_to__application`,
     });
     
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const resultData = result as { d?: any[] } | any[];
     const releases = 'd' in resultData && resultData.d ? resultData.d : (Array.isArray(resultData) ? resultData : []);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transformedReleases = releases.map((r: any) => ({
       id: r.id.toString(),
       commit: r.commit || '',
@@ -78,10 +80,25 @@ export async function POST(
     }
 
     const balena = await getAuthenticatedSdk();
+    const apiUrl = getApiUrl();
 
-    // Deploy release to application
-    // This typically involves setting the release as the target for the application
-    await balena.models.application.setToRelease(parseInt(applicationId), parseInt(releaseId));
+    // Deploy release to application by updating all devices in the application
+    // First, get all devices in the application
+    const devices = await balena.models.device.getAllByApplication(parseInt(applicationId));
+    
+    // Update each device to point to the new release
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updatePromises = devices.map((device: any) =>
+      balena.request.send({
+        method: 'PATCH',
+        url: `${apiUrl}/v6/device(${device.id})`,
+        body: {
+          should_be_running__release: parseInt(releaseId),
+        },
+      })
+    );
+
+    await Promise.all(updatePromises);
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

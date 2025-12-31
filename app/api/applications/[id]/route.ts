@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk } from '../../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk, getApiUrl } from '../../../../lib/balena/sdk-auth';
 
 export async function GET(
   request: NextRequest,
@@ -22,6 +22,7 @@ export async function GET(
 
     // Get authenticated SDK instance
     const balena = await getAuthenticatedSdk();
+    const apiUrl = getApiUrl();
 
     // Get application details
     const app = await balena.models.application.get(parseInt(applicationId));
@@ -30,14 +31,14 @@ export async function GET(
     const devices = await balena.models.device.getAllByApplication(parseInt(applicationId));
     
     // Get releases for this application
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let releases: any[] = [];
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_BALENA_API_URL || 'https://api.balena-cloud.com';
-      const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
       const result = await balena.request.send({
         method: 'GET',
-        url: `${cleanApiUrl}/v7/release?$filter=belongs_to__application/id eq ${applicationId}&$orderby=created_at desc&$expand=belongs_to__application`,
+        url: `${apiUrl}/v7/release?$filter=belongs_to__application/id eq ${applicationId}&$orderby=created_at desc&$expand=belongs_to__application`,
       });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const resultData = result as { d?: any[] } | any[];
       releases = 'd' in resultData && resultData.d ? resultData.d : (Array.isArray(resultData) ? resultData : []);
     } catch (releaseError) {
@@ -45,6 +46,7 @@ export async function GET(
     }
 
     // Get environment variables
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let envVars: any[] = [];
     try {
       envVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
@@ -52,10 +54,17 @@ export async function GET(
       console.warn('Failed to fetch env vars:', envError);
     }
 
-    // Get tags
+    // Get tags - use direct API call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let tags: any[] = [];
     try {
-      tags = await balena.models.application.tag.getAllByApplication(parseInt(applicationId));
+      const tagsResult = await balena.request.send({
+        method: 'GET',
+        url: `${apiUrl}/v6/application_tag?$filter=belongs_to__application/id eq ${applicationId}`,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tagsData = tagsResult as { d?: any[] } | any[];
+      tags = 'd' in tagsData && tagsData.d ? tagsData.d : (Array.isArray(tagsData) ? tagsData : []);
     } catch (tagError) {
       console.warn('Failed to fetch tags:', tagError);
     }
@@ -80,24 +89,31 @@ export async function GET(
 
     return NextResponse.json({
       id: app.id.toString(),
-      name: app.app_name || app.name,
+      name: app.app_name || 'Unknown',
       slug: app.slug,
-      deviceType: app.is_for__device_type?.name || 'Unknown',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deviceType: (app.is_for__device_type as any)?.name || 
+                  (app as any).device_type || 
+                  (app.is_for__device_type as any)?.slug ||
+                  'Unknown',
       deviceCount: devices.length,
       devices: transformedDevices,
       releases: transformedReleases,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       envVars: envVars.map((ev: any) => ({
         id: ev.id?.toString() || '',
         name: ev.name || ev.env_var_name,
         value: ev.value || ev.env_var_value,
       })),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tags: tags.map((t: any) => ({
         id: t.id?.toString() || '',
         key: t.tag_key || t.name,
         value: t.value || t.tag_value,
       })),
       createdAt: app.created_at ? new Date(app.created_at).toISOString() : new Date().toISOString(),
-      updatedAt: app.modified_at ? new Date(app.modified_at).toISOString() : new Date().toISOString(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updatedAt: (app as any).modified_at ? new Date((app as any).modified_at).toISOString() : new Date().toISOString(),
     });
   } catch (error: unknown) {
     console.error('Get application error:', error);

@@ -14,24 +14,7 @@ export async function POST(request: NextRequest) {
 
     // For global provisioning, we need to create a provisioning key
     // In OpenBalena, this is typically done through the API
-    // We'll use the SDK's request method to create a provisioning key
-    
-    try {
-      // Try to use SDK's device.provision method if available
-      // Note: This might not be available in all SDK versions
-      if (typeof balena.models.device?.provision === 'function') {
-        const provisioningKey = await balena.models.device.provision();
-        return NextResponse.json({ 
-          key: provisioningKey,
-          provisioningKey: provisioningKey,
-        });
-      }
-    } catch (sdkError) {
-      console.log('SDK provision method not available, trying API directly:', sdkError);
-    }
-
-    // Fallback: Use API directly to create a provisioning key
-    // In OpenBalena, provisioning keys are typically created via POST to /api-key/provisioning
+    // Use the direct API approach since SDK doesn't have a provision method
     try {
       const response = await balena.request.send({
         method: 'POST',

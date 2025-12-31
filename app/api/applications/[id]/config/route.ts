@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk } from '../../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk, getApiUrl } from '../../../../../lib/balena/sdk-auth';
 
 export async function GET(
   request: NextRequest,
@@ -21,19 +21,34 @@ export async function GET(
     }
 
     const balena = await getAuthenticatedSdk();
+    const apiUrl = getApiUrl();
 
     // Get environment variables
     const envVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
     
-    // Get tags
-    const tags = await balena.models.application.tag.getAllByApplication(parseInt(applicationId));
+    // Get tags - use direct API call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let tags: any[] = [];
+    try {
+      const tagsResult = await balena.request.send({
+        method: 'GET',
+        url: `${apiUrl}/v6/application_tag?$filter=belongs_to__application/id eq ${applicationId}`,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tagsData = tagsResult as { d?: any[] } | any[];
+      tags = 'd' in tagsData && tagsData.d ? tagsData.d : (Array.isArray(tagsData) ? tagsData : []);
+    } catch (tagError) {
+      console.warn('Failed to fetch tags:', tagError);
+    }
 
     return NextResponse.json({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       envVars: envVars.map((ev: any) => ({
         id: ev.id?.toString() || '',
         name: ev.name || ev.env_var_name,
         value: ev.value || ev.env_var_value,
       })),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tags: tags.map((t: any) => ({
         id: t.id?.toString() || '',
         key: t.tag_key || t.name,
@@ -69,16 +84,31 @@ export async function PUT(
     }
 
     const balena = await getAuthenticatedSdk();
+    const apiUrl = getApiUrl();
 
     // Update environment variables
     if (envVars) {
       for (const envVar of envVars) {
         if (envVar.id) {
-          // Update existing
-          await balena.models.application.envVar.update(parseInt(envVar.id), envVar.value);
+          // Update existing - use direct API call since SDK doesn't have update method
+          await balena.request.send({
+            method: 'PATCH',
+            url: `${apiUrl}/v6/application_environment_variable(${envVar.id})`,
+            body: {
+              value: envVar.value,
+            },
+          });
         } else {
-          // Create new
-          await balena.models.application.envVar.create(parseInt(applicationId), envVar.name, envVar.value);
+          // Create new - use direct API call
+          await balena.request.send({
+            method: 'POST',
+            url: `${apiUrl}/v6/application_environment_variable`,
+            body: {
+              belongs_to__application: parseInt(applicationId),
+              name: envVar.name,
+              value: envVar.value,
+            },
+          });
         }
       }
     }
@@ -87,11 +117,25 @@ export async function PUT(
     if (tags) {
       for (const tag of tags) {
         if (tag.id) {
-          // Update existing
-          await balena.models.application.tag.update(parseInt(tag.id), tag.value);
+          // Update existing - use direct API call since SDK doesn't have update method
+          await balena.request.send({
+            method: 'PATCH',
+            url: `${apiUrl}/v6/application_tag(${tag.id})`,
+            body: {
+              value: tag.value,
+            },
+          });
         } else {
-          // Create new
-          await balena.models.application.tag.create(parseInt(applicationId), tag.key, tag.value);
+          // Create new - use direct API call
+          await balena.request.send({
+            method: 'POST',
+            url: `${apiUrl}/v6/application_tag`,
+            body: {
+              belongs_to__application: parseInt(applicationId),
+              tag_key: tag.key,
+              value: tag.value,
+            },
+          });
         }
       }
     }

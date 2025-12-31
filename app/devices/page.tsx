@@ -23,9 +23,11 @@ import {
   CheckSquare,
   Square,
   FileText,
+  Activity,
 } from 'lucide-react';
 import { useDevices } from '../../hooks/useDevices';
-import { Device, DeviceFilters } from '../../lib/balena';
+import { useApplications } from '../../hooks/useApplications';
+import { Device, Application, DeviceFilters } from '../../lib/balena';
 import { getVenueIds, setVenueIds, getDeviceIp } from '../../lib/balena/tags';
 import { rebootDevice, shutdownDevice, triggerUpdate } from '../../lib/balena/supervisor';
 
@@ -61,6 +63,7 @@ export default function DevicesPage() {
   }, [statusFilter, applicationFilter, deviceTypeFilter]);
 
   const { devices: apiDevices, loading, error, refetch } = useDevices(apiFilters);
+  const { applications: allApplications } = useApplications();
 
   // Dummy data for when API fails
   const dummyDevices: Device[] = useMemo(() => [
@@ -286,8 +289,8 @@ export default function DevicesPage() {
     };
   }, [devices]);
 
-  // Get unique applications for filter
-  const applications = useMemo(() => {
+  // Get unique application names for filter
+  const applicationNames = useMemo(() => {
     if (!devices) return [];
     return Array.from(new Set(devices.map((d) => d.application).filter(Boolean))).sort();
   }, [devices]);
@@ -429,7 +432,7 @@ export default function DevicesPage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="all">All Applications</option>
-                {applications.map((app) => (
+                {applicationNames.map((app) => (
                   <option key={app} value={app}>
                     {app}
                   </option>
@@ -634,7 +637,7 @@ export default function DevicesPage() {
         {showMoveModal && (
           <MoveToFleetModal
             deviceIds={Array.from(selectedDeviceIds)}
-            applications={applications}
+            applications={allApplications || []}
             onClose={() => setShowMoveModal(false)}
             onSuccess={() => {
               setShowMoveModal(false);
