@@ -4,13 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk, getApiUrl } from '../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk } from '../../../lib/balena/sdk-auth';
 
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated SDK instance (uses token from HTTP-only cookie)
     const balena = await getAuthenticatedSdk();
-    const cleanApiUrl = getApiUrl();
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -18,106 +17,123 @@ export async function GET(request: NextRequest) {
     const applicationFilter = searchParams.get('application');
     const deviceTypeFilter = searchParams.get('deviceType');
 
-    // Fetch devices using SDK
+    // Fetch devices using SDK model methods (same pattern as applications route)
     let devices: any[] = [];
 
     try {
-      // Get all devices using SDK
-      // Note: SDK might not have getAll() method, so we'll use request.send()
-      
-      // Build OData query
-      const expandParams = 'belongs_to__application,is_of__device_type,should_be_running__release,device_tag';
-      let odataQuery = `$expand=${expandParams}&$orderby=device_name asc`;
-      
-      // Add filters
-      const filterConditions: string[] = [];
-      if (statusFilter && statusFilter !== 'all') {
-        if (statusFilter === 'online') {
-          filterConditions.push('is_online eq true');
-        } else if (statusFilter === 'offline') {
-          filterConditions.push('is_online eq false');
-        }
-      }
-      if (applicationFilter && applicationFilter !== 'all') {
-        filterConditions.push(`belongs_to__application/app_name eq '${applicationFilter}'`);
-      }
-      if (deviceTypeFilter && deviceTypeFilter !== 'all') {
-        filterConditions.push(`is_of__device_type/name eq '${deviceTypeFilter}'`);
-      }
-      
-      if (filterConditions.length > 0) {
-        odataQuery += `&$filter=${filterConditions.join(' and ')}`;
-      }
+      // Get all applications first (needed for both fetching devices and lookup)
+      const applications = await balena.models.application.getAll({});
+      console.log(`Found ${applications.length} applications`);
 
-      // Use SDK's request method to get devices
-      const result = await balena.request.send({
-        method: 'GET',
-        url: `${cleanApiUrl}/v7/device?${odataQuery}`,
+      // Create applications map for lookup
+      const applicationsMap = new Map(applications.map((app: any) => [app.id, app]));
+
+      // Get devices for each application
+      const devicePromises = applications.map(async (app: any) => {
+        try {
+          return await balena.models.device.getAllByApplication(app.id);
+        } catch (error) {
+          console.warn(`Error fetching devices for application ${app.id}:`, error);
+          return [];
+        }
+      });
+      
+      const deviceArrays = await Promise.all(devicePromises);
+      devices = deviceArrays.flat();
+      console.log(`SDK fetched ${devices.length} devices`);
+
+      // Transform devices to match our Device interface format
+      let transformedDevices = devices.map((d: any) => {
+        // Get application info - SDK model methods return belongs_to__application as ID reference
+        const applicationId = typeof d.belongs_to__application === 'object' 
+          ? d.belongs_to__application?.id 
+          : d.belongs_to__application;
+        const application = applicationId ? applicationsMap.get(applicationId) : null;
+        const applicationName = application?.app_name || 'Unknown';
+        const applicationIdStr = applicationId?.toString() || '';
+
+        // Get device type - SDK might return as ID reference or object
+        let deviceType = 'Unknown';
+        if (d.is_of__device_type) {
+          if (typeof d.is_of__device_type === 'object') {
+            deviceType = d.is_of__device_type?.name || d.is_of__device_type?.slug || 'Unknown';
+          } else {
+            deviceType = 'Unknown'; // If it's just an ID, we'd need to fetch it separately
+          }
+        }
+
+        // Get release info
+        const release = d.should_be_running__release;
+        const currentVersion = release?.release_version || 
+                              (release?.commit ? `commit-${release.commit.substring(0, 7)}` : 'unknown');
+
+        // Get tags - SDK model methods might not include tags, so we'll set empty array
+        // Tags can be fetched separately if needed
+        const tags: string[] = [];
+        const venueIds: string[] = [];
+
+        return {
+          id: d.id.toString(),
+          name: d.device_name || d.name || `Device ${d.id}`,
+          uuid: d.uuid || '',
+          status: d.is_online ? 'online' as const : 'offline' as const,
+          application: applicationName,
+          applicationId: applicationIdStr,
+          deviceType,
+          deviceTypeCategory: deviceType.toLowerCase().includes('raspberry') ? 'Raspberry Pi' as const : 'Compute Module' as const,
+          currentVersion,
+          cpuUsage: 0, // Will be populated by metrics if available
+          memoryUsage: 0,
+          memoryTotal: 0,
+          memoryUsed: 0,
+          storageUsage: 0,
+          storageTotal: 0,
+          storageUsed: 0,
+          temperature: 0,
+          lastSeen: d.last_connectivity_event || d.modified_at || new Date().toISOString(),
+          tags,
+          osVersion: d.os_version || 'BalenaOS',
+          supervisorVersion: d.supervisor_version || 'Unknown',
+          venueIds,
+        };
       });
 
-      // Handle OData response format
-      const resultData = result as { d?: any[] } | any[];
-      devices = 'd' in resultData && resultData.d ? resultData.d : (Array.isArray(resultData) ? resultData : []);
-      
-      console.log(`SDK fetched ${devices.length} devices`);
+      // Apply filters in JavaScript
+      if (statusFilter && statusFilter !== 'all') {
+        transformedDevices = transformedDevices.filter((d) => {
+          if (statusFilter === 'online') return d.status === 'online';
+          if (statusFilter === 'offline') return d.status === 'offline';
+          return true;
+        });
+      }
+
+      if (applicationFilter && applicationFilter !== 'all') {
+        transformedDevices = transformedDevices.filter((d) => d.application === applicationFilter);
+      }
+
+      if (deviceTypeFilter && deviceTypeFilter !== 'all') {
+        transformedDevices = transformedDevices.filter((d) => {
+          const deviceTypeLower = d.deviceType.toLowerCase();
+          if (deviceTypeFilter === 'Raspberry Pi') {
+            return deviceTypeLower.includes('raspberry');
+          }
+          if (deviceTypeFilter === 'Compute Module') {
+            return deviceTypeLower.includes('compute') || deviceTypeLower.includes('module');
+          }
+          return true;
+        });
+      }
+
+      // Sort by device name
+      transformedDevices.sort((a, b) => a.name.localeCompare(b.name));
+
+      console.log(`Returning ${transformedDevices.length} transformed devices`);
+
+      return NextResponse.json(transformedDevices);
     } catch (sdkError) {
       console.error('SDK methods failed:', sdkError);
       throw sdkError;
     }
-
-    // Transform devices to match our Device interface format
-    const transformedDevices = devices.map((d: any) => {
-      // Get tags
-      const tags = (d.device_tag || []).map((tag: any) => {
-        if (typeof tag === 'string') return tag;
-        return `${tag.tag_key || 'tag'}:${tag.value || ''}`;
-      });
-
-      // Get application info
-      const application = d.belongs_to__application;
-      const applicationName = application?.app_name || 'Unknown';
-      const applicationId = application?.id?.toString() || '';
-
-      // Get device type
-      const deviceType = d.is_of__device_type?.name || 
-                        d.device_type || 
-                        d.is_of__device_type?.slug ||
-                        'Unknown';
-
-      // Get release info
-      const release = d.should_be_running__release;
-      const currentVersion = release?.release_version || 
-                            (release?.commit ? `commit-${release.commit.substring(0, 7)}` : 'unknown');
-
-      return {
-        id: d.id.toString(),
-        name: d.device_name || d.name || `Device ${d.id}`,
-        uuid: d.uuid || '',
-        status: d.is_online ? 'online' as const : 'offline' as const,
-        application: applicationName,
-        applicationId,
-        deviceType,
-        deviceTypeCategory: deviceType.toLowerCase().includes('raspberry') ? 'Raspberry Pi' as const : 'Compute Module' as const,
-        currentVersion,
-        cpuUsage: 0, // Will be populated by metrics if available
-        memoryUsage: 0,
-        memoryTotal: 0,
-        memoryUsed: 0,
-        storageUsage: 0,
-        storageTotal: 0,
-        storageUsed: 0,
-        temperature: 0,
-        lastSeen: d.last_connectivity_event || d.modified_at || new Date().toISOString(),
-        tags,
-        osVersion: 'BalenaOS',
-        supervisorVersion: 'Unknown',
-        venueIds: tags.filter((t: string) => t.startsWith('venue_id:')).map((t: string) => t.split(':')[1]),
-      };
-    });
-
-    console.log(`Returning ${transformedDevices.length} transformed devices`);
-
-    return NextResponse.json(transformedDevices);
   } catch (error: unknown) {
     console.error('Get devices error:', error);
     
