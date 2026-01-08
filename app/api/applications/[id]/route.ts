@@ -25,7 +25,7 @@ export async function GET(
 
     // Get application details - include should_be_running__release to know current target
     const app = await balena.models.application.get(parseInt(applicationId), {
-      $select: ['id', 'app_name', 'slug', 'is_for__device_type', 'should_be_running__release', 'created_at', 'modified_at'],
+      $select: ['id', 'app_name', 'slug', 'is_for__device_type', 'should_be_running__release', 'created_at'],
       $expand: {
         is_for__device_type: {
           $select: ['name', 'slug'],
@@ -47,7 +47,7 @@ export async function GET(
     let devices: any[] = [];
     try {
       devices = await balena.models.device.getAllByApplication(parseInt(applicationId), {
-        $select: ['id', 'device_name', 'uuid', 'is_online', 'last_connectivity_event', 'modified_at', 'should_be_running__release'],
+        $select: ['id', 'device_name', 'uuid', 'is_online', 'last_connectivity_event', 'should_be_running__release'],
       });
       console.log(`Fetched ${devices.length} devices for application ${applicationId}`);
     } catch (deviceError) {
@@ -113,7 +113,7 @@ export async function GET(
       name: d.device_name || d.name || `Device ${d.id}`,
       uuid: d.uuid || '',
       status: d.is_online ? 'online' as const : 'offline' as const,
-      lastSeen: d.last_connectivity_event || d.modified_at || new Date().toISOString(),
+      lastSeen: d.last_connectivity_event || (d as any).modified_at || new Date().toISOString(),
     }));
 
     const transformedReleases = releases.map((r: any, index: number) => {

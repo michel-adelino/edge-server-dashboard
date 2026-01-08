@@ -224,12 +224,14 @@ export async function POST(
           // If SDK method fails, try using Pine client directly as last resort
           try {
             if (balena.pine && typeof balena.pine.patch === 'function') {
+              // Use type assertion to bypass TypeScript check since we know the field exists in the API
               await balena.pine.patch({
                 resource: 'device',
                 id: deviceId,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 body: {
                   should_be_running__release: parseInt(releaseId),
-                },
+                } as any,
               });
               successCount++;
               console.log(`Updated device ${deviceId} using Pine client fallback`);
