@@ -37,10 +37,19 @@ export async function GET(
     });
     
     // Get the current target release ID from application
+    // Handle different possible formats: object with id, direct number, or nested __id
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentTargetReleaseId = (app as any).should_be_running__release?.id || 
-                                   (app as any).should_be_running__release?.__id || 
-                                   null;
+    let currentTargetReleaseId: number | null = null;
+    const targetRelease = (app as any).should_be_running__release;
+    if (targetRelease) {
+      if (typeof targetRelease === 'number') {
+        currentTargetReleaseId = targetRelease;
+      } else if (targetRelease.id) {
+        currentTargetReleaseId = typeof targetRelease.id === 'number' ? targetRelease.id : parseInt(String(targetRelease.id));
+      } else if (targetRelease.__id) {
+        currentTargetReleaseId = typeof targetRelease.__id === 'number' ? targetRelease.__id : parseInt(String(targetRelease.__id));
+      }
+    }
     
     // Get devices for this application - include their target release info
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,13 +69,37 @@ export async function GET(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const releaseDeviceCounts = new Map<number, number>();
     devices.forEach((device: any) => {
-      const deviceTargetReleaseId = device.should_be_running__release?.id || 
-                                    device.should_be_running__release?.__id || 
-                                    null;
+      let deviceTargetReleaseId: number | null = null;
+      const deviceTargetRelease = device.should_be_running__release;
+      if (deviceTargetRelease) {
+        if (typeof deviceTargetRelease === 'number') {
+          deviceTargetReleaseId = deviceTargetRelease;
+        } else if (deviceTargetRelease.id) {
+          deviceTargetReleaseId = typeof deviceTargetRelease.id === 'number' ? deviceTargetRelease.id : parseInt(String(deviceTargetRelease.id));
+        } else if (deviceTargetRelease.__id) {
+          deviceTargetReleaseId = typeof deviceTargetRelease.__id === 'number' ? deviceTargetRelease.__id : parseInt(String(deviceTargetRelease.__id));
+        }
+      }
       if (deviceTargetReleaseId) {
         releaseDeviceCounts.set(deviceTargetReleaseId, (releaseDeviceCounts.get(deviceTargetReleaseId) || 0) + 1);
       }
     });
+    
+    // If no application-level target release is set, use the release that most devices are targeting
+    if (currentTargetReleaseId === null && releaseDeviceCounts.size > 0) {
+      let maxCount = 0;
+      let mostCommonReleaseId: number | null = null;
+      releaseDeviceCounts.forEach((count, releaseId) => {
+        if (count > maxCount) {
+          maxCount = count;
+          mostCommonReleaseId = releaseId;
+        }
+      });
+      if (mostCommonReleaseId !== null) {
+        currentTargetReleaseId = mostCommonReleaseId;
+        console.log(`No application target release set, using most common device target: ${mostCommonReleaseId} (${maxCount} devices)`);
+      }
+    }
     
     // Get releases for this application - use SDK method
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -157,7 +190,8 @@ export async function GET(
         const isFinal = Boolean(r.is_final || r.is_finalized || r.finalized || false);
         
         // Check if this is the currently deployed release
-        const isDeployed = currentTargetReleaseId !== null && releaseIdNum === currentTargetReleaseId;
+        // Compare as numbers to ensure proper matching
+        const isDeployed = currentTargetReleaseId !== null && releaseIdNum !== 0 && releaseIdNum === currentTargetReleaseId;
         const deployedDeviceCount = releaseDeviceCounts.get(releaseIdNum) || 0;
         
         // Ensure all values are primitives
