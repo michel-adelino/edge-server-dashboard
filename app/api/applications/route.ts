@@ -92,57 +92,78 @@ export async function GET(request: NextRequest) {
           ? Math.round(validMetrics.reduce((sum: number, m: any) => sum + (m.memoryUsage || 0), 0) / validMetrics.length)
           : 0;
 
-        // Get current target release info
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const targetRelease = (app as any).should_be_running__release;
+        // Get current target release info - always fetch releases to get the latest
         let releaseVersion = 'unknown';
         let releaseCommit = 'unknown';
         
-        if (targetRelease) {
+        try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const releaseVersionRaw = (targetRelease as any).release_version;
-          if (typeof releaseVersionRaw === 'string') {
-            releaseVersion = releaseVersionRaw;
-          } else if (releaseVersionRaw && typeof releaseVersionRaw === 'object') {
-            // Handle semver object
-            if (releaseVersionRaw.raw) {
-              releaseVersion = releaseVersionRaw.raw;
-            } else if (releaseVersionRaw.version) {
-              releaseVersion = releaseVersionRaw.version;
-            } else if (releaseVersionRaw.major !== undefined) {
-              releaseVersion = `${releaseVersionRaw.major || 0}.${releaseVersionRaw.minor || 0}.${releaseVersionRaw.patch || 0}`;
-            }
-          }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          releaseCommit = (targetRelease as any).commit || 'unknown';
-        } else {
-          // If no target release, try to get the latest release
-          try {
+          const releases: any[] = await balena.models.release.getAllByApplication(app.id);
+          if (releases.length > 0) {
+            // Sort by created_at descending and get the latest
+            releases.sort((a: any, b: any) => {
+              const dateA = new Date(a.created_at || 0).getTime();
+              const dateB = new Date(b.created_at || 0).getTime();
+              return dateB - dateA;
+            });
+            
+            // Try to get the target release first, otherwise use the latest
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const releases: any[] = await balena.models.release.getAllByApplication(app.id);
-            if (releases.length > 0) {
-              // Sort by created_at descending and get the latest
-              releases.sort((a: any, b: any) => {
-                const dateA = new Date(a.created_at || 0).getTime();
-                const dateB = new Date(b.created_at || 0).getTime();
-                return dateB - dateA;
-              });
-              const latestRelease = releases[0];
-              const versionRaw = latestRelease.release_version || latestRelease.version || latestRelease.semver;
-              if (typeof versionRaw === 'string') {
-                releaseVersion = versionRaw;
-              } else if (versionRaw && typeof versionRaw === 'object') {
-                if (versionRaw.raw) releaseVersion = versionRaw.raw;
-                else if (versionRaw.version) releaseVersion = versionRaw.version;
-                else if (versionRaw.major !== undefined) {
-                  releaseVersion = `${versionRaw.major || 0}.${versionRaw.minor || 0}.${versionRaw.patch || 0}`;
+            const targetRelease = (app as any).should_be_running__release;
+            let selectedRelease = releases[0]; // Default to latest
+            
+            if (targetRelease) {
+              // Try to find the target release in the list
+              let targetReleaseId: number | null = null;
+              if (typeof targetRelease === 'number') {
+                targetReleaseId = targetRelease;
+              } else if (targetRelease.id) {
+                targetReleaseId = typeof targetRelease.id === 'number' ? targetRelease.id : parseInt(String(targetRelease.id));
+              } else if (targetRelease.__id) {
+                targetReleaseId = typeof targetRelease.__id === 'number' ? targetRelease.__id : parseInt(String(targetRelease.__id));
+              }
+              
+              if (targetReleaseId) {
+                const foundRelease = releases.find((r: any) => {
+                  const releaseId = parseInt(String(r.id || r.release_id || '0'));
+                  return releaseId === targetReleaseId;
+                });
+                if (foundRelease) {
+                  selectedRelease = foundRelease;
                 }
               }
-              releaseCommit = latestRelease.commit || latestRelease.commit_hash || 'unknown';
             }
-          } catch (releaseError) {
-            console.warn(`Failed to fetch releases for app ${app.id} (non-critical):`, releaseError);
+            
+            // Extract version from selected release
+            const versionRaw = selectedRelease.release_version || selectedRelease.version || selectedRelease.semver;
+            if (typeof versionRaw === 'string' && versionRaw.trim() !== '') {
+              releaseVersion = versionRaw;
+            } else if (versionRaw && typeof versionRaw === 'object') {
+              if (versionRaw.raw && typeof versionRaw.raw === 'string') {
+                releaseVersion = versionRaw.raw;
+              } else if (versionRaw.version && typeof versionRaw.version === 'string') {
+                releaseVersion = versionRaw.version;
+              } else if (versionRaw.major !== undefined) {
+                releaseVersion = `${versionRaw.major || 0}.${versionRaw.minor || 0}.${versionRaw.patch || 0}`;
+                if (versionRaw.prerelease) {
+                  releaseVersion += `-${versionRaw.prerelease}`;
+                }
+                if (versionRaw.build) {
+                  releaseVersion += `+${versionRaw.build}`;
+                }
+              }
+            }
+            
+            // Extract commit
+            releaseCommit = selectedRelease.commit || selectedRelease.commit_hash || 'unknown';
+            
+            // If version is still unknown, use commit hash as fallback
+            if (releaseVersion === 'unknown' && releaseCommit !== 'unknown') {
+              releaseVersion = releaseCommit.substring(0, 7);
+            }
           }
+        } catch (releaseError) {
+          console.warn(`Failed to fetch releases for app ${app.id} (non-critical):`, releaseError);
         }
 
         // Get tags using SDK

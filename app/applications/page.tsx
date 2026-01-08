@@ -13,8 +13,6 @@ import {
   ArrowRight,
   Tag,
   Package,
-  Cpu,
-  MemoryStick,
   Loader2,
   AlertCircle,
   X,
@@ -255,41 +253,6 @@ function ApplicationCard({ application }: { application: Application }) {
         )}
       </div>
 
-      {/* Metrics */}
-      {application.status === 'running' && application.deviceCount > 0 && (
-        <div className="mb-4 space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center text-slate-600 dark:text-slate-400">
-              <Cpu className="h-4 w-4 mr-1.5" />
-              CPU
-            </div>
-            <span className="font-medium text-slate-900 dark:text-white">
-              {application.avgCpuUsage}%
-            </span>
-          </div>
-          <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
-            <div
-              className="bg-primary-500 h-2 rounded-full"
-              style={{ width: `${application.avgCpuUsage}%` }}
-            />
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center text-slate-600 dark:text-slate-400">
-              <MemoryStick className="h-4 w-4 mr-1.5" />
-              Memory
-            </div>
-            <span className="font-medium text-slate-900 dark:text-white">
-              {application.avgMemoryUsage}%
-            </span>
-          </div>
-          <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
-            <div
-              className="bg-primary-500 h-2 rounded-full"
-              style={{ width: `${application.avgMemoryUsage}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Release Info */}
       <div className="mb-4 flex items-center justify-between text-sm">
