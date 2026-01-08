@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk, getApiUrl } from '../../../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk } from '../../../../../lib/balena/sdk-auth';
 
 export async function GET(
   request: NextRequest,
@@ -22,95 +22,58 @@ export async function GET(
 
     // Get authenticated SDK instance
     const balena = await getAuthenticatedSdk();
-    const apiUrl = getApiUrl();
 
-    // Get releases for this application using SDK
-    // Use SDK's Pine client (same approach as other SDK model methods use internally)
+    // Get application to find current target release
+    const app = await balena.models.application.get(parseInt(applicationId), {
+      $select: ['should_be_running__release'],
+      $expand: {
+        should_be_running__release: {
+          $select: ['id'],
+        },
+      },
+    });
+    
+    // Get the current target release ID from application
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentTargetReleaseId = (app as any).should_be_running__release?.id || 
+                                   (app as any).should_be_running__release?.__id || 
+                                   null;
+    
+    // Get devices to count how many are targeting each release
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let devices: any[] = [];
+    try {
+      devices = await balena.models.device.getAllByApplication(parseInt(applicationId), {
+        $select: ['should_be_running__release'],
+      });
+    } catch (deviceError) {
+      console.warn('Failed to fetch devices for release counts (non-critical):', deviceError);
+    }
+    
+    // Count how many devices are targeting each release
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const releaseDeviceCounts = new Map<number, number>();
+    devices.forEach((device: any) => {
+      const deviceTargetReleaseId = device.should_be_running__release?.id || 
+                                    device.should_be_running__release?.__id || 
+                                    null;
+      if (deviceTargetReleaseId) {
+        releaseDeviceCounts.set(deviceTargetReleaseId, (releaseDeviceCounts.get(deviceTargetReleaseId) || 0) + 1);
+      }
+    });
+
+    // Get releases for this application - use SDK method
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let releases: any[] = [];
     try {
-      // Try using SDK's Pine client first (this is what SDK models use internally)
-      if (balena.pine && typeof balena.pine.get === 'function') {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const pineResult: any = await balena.pine.get({
-            resource: 'release',
-            options: {
-              $filter: {
-                belongs_to__application: parseInt(applicationId),
-              },
-              $orderby: 'created_at',
-              $expand: ['belongs_to__application'],
-            },
-          });
-          
-          // Pine client returns array directly or wrapped
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          releases = Array.isArray(pineResult) ? pineResult : (pineResult?.d || pineResult?.value || []);
-          // Sort descending since SDK might not support 'desc' in orderby
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          releases = releases.sort((a: any, b: any) => {
-            const dateA = new Date(a.created_at || 0).getTime();
-            const dateB = new Date(b.created_at || 0).getTime();
-            return dateB - dateA; // Descending order
-          });
-          
-          console.log(`SDK Pine client fetched ${releases.length} releases for application ${applicationId}`);
-        } catch (pineError) {
-          console.warn('Pine client failed, falling back to request.send():', pineError);
-          // Fall through to request.send()
-        }
-      }
-      
-      // Fallback to request.send() if Pine client failed or isn't available
-      if (releases.length === 0) {
-        const result = await balena.request.send({
-          method: 'GET',
-          url: `${apiUrl}/v7/release?$filter=belongs_to__application/id eq ${applicationId}&$orderby=created_at desc&$expand=belongs_to__application`,
-        });
-        
-        // Handle different response formats from balena.request.send()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let resultData: any = result;
-        
-        // Check if result is a response object with body/data property
-        if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-          if ('body' in resultData && resultData.body !== undefined) {
-            resultData = resultData.body;
-          } else if ('data' in resultData && resultData.data !== undefined) {
-            resultData = resultData.data;
-          } else if ('response' in resultData && resultData.response !== undefined) {
-            resultData = resultData.response;
-          }
-        }
-        
-        // Handle OData response formats
-        if (resultData && typeof resultData === 'object') {
-          if ('d' in resultData) {
-            // OData v2 format: { d: { results: [...] } } or { d: [...] }
-            if (Array.isArray(resultData.d)) {
-              resultData = resultData.d;
-            } else if (resultData.d && Array.isArray(resultData.d.results)) {
-              resultData = resultData.d.results;
-            } else if (resultData.d && typeof resultData.d === 'object') {
-              // Try to find array in d object
-              const dKeys = Object.keys(resultData.d);
-              for (const key of dKeys) {
-                if (Array.isArray(resultData.d[key])) {
-                  resultData = resultData.d[key];
-                  break;
-                }
-              }
-            }
-          } else if ('value' in resultData && Array.isArray(resultData.value)) {
-            // OData v4 format
-            resultData = resultData.value;
-          }
-        }
-        
-        releases = Array.isArray(resultData) ? resultData : [];
-        console.log(`SDK request.send() fetched ${releases.length} releases for application ${applicationId}`);
-      }
+      releases = await balena.models.release.getAllByApplication(parseInt(applicationId));
+      // Sort by created_at descending (newest first)
+      releases = releases.sort((a: any, b: any) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA; // Descending order
+      });
+      console.log(`Fetched ${releases.length} releases for application ${applicationId}`);
     } catch (releaseError) {
       console.error('Failed to fetch releases:', releaseError);
       // Don't fail the entire request, but log the error
@@ -146,6 +109,11 @@ export async function GET(
           version = String(versionRaw);
         }
         
+        // Check if this is the currently deployed release
+        const releaseIdNum = parseInt(String(r.id || r.release_id || '0'));
+        const isDeployed = currentTargetReleaseId !== null && releaseIdNum === currentTargetReleaseId;
+        const deployedDeviceCount = releaseDeviceCounts.get(releaseIdNum) || 0;
+        
         return {
           id: (r.id || r.release_id || '').toString(),
           commit: String(r.commit || r.commit_hash || ''),
@@ -153,6 +121,8 @@ export async function GET(
           status: String(r.status || r.release_status || 'success'),
           version: String(version),
           isFinal: Boolean(r.is_final || r.is_finalized || r.finalized || false),
+          isDeployed: isDeployed,
+          deployedDeviceCount: deployedDeviceCount,
         };
       } catch (error) {
         console.error('Error transforming release:', error, r);
@@ -164,6 +134,8 @@ export async function GET(
           status: 'unknown',
           version: '0.0.0',
           isFinal: false,
+          isDeployed: false,
+          deployedDeviceCount: 0,
         };
       }
     });
@@ -213,25 +185,78 @@ export async function POST(
     }
 
     const balena = await getAuthenticatedSdk();
-    const apiUrl = getApiUrl();
 
     // Deploy release to application by updating all devices in the application
     // First, get all devices in the application
     const devices = await balena.models.device.getAllByApplication(parseInt(applicationId));
     
-    // Update each device to point to the new release
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updatePromises = devices.map((device: any) =>
-      balena.request.send({
-        method: 'PATCH',
-        url: `${apiUrl}/v6/device(${device.id})`,
-        body: {
-          should_be_running__release: parseInt(releaseId),
-        },
-      })
-    );
-
-    await Promise.all(updatePromises);
+    const deviceIds = devices.map((device: any) => device.id);
+    
+    if (deviceIds.length === 0) {
+      return NextResponse.json({ 
+        success: true, 
+        message: 'No devices found in application' 
+      });
+    }
+    
+    // Try batch operation first (more efficient)
+    try {
+      // Use pinToRelease to set all devices to the target release
+      // pinToRelease accepts an array of device IDs
+      await balena.models.device.pinToRelease(deviceIds, parseInt(releaseId));
+      console.log(`Deployed release ${releaseId} to ${deviceIds.length} devices in application ${applicationId} (batch)`);
+    } catch (batchError: any) {
+      // If batch operation fails (e.g., socket errors), fall back to individual updates
+      console.warn('Batch pinToRelease failed, trying individual updates:', batchError);
+      
+      // Update devices one at a time as fallback
+      let successCount = 0;
+      let failureCount = 0;
+      const errors: string[] = [];
+      
+      // Try individual SDK updates first
+      for (const deviceId of deviceIds) {
+        try {
+          await balena.models.device.pinToRelease(deviceId, parseInt(releaseId));
+          successCount++;
+        } catch (individualError: any) {
+          // If SDK method fails, try using Pine client directly as last resort
+          try {
+            if (balena.pine && typeof balena.pine.patch === 'function') {
+              await balena.pine.patch({
+                resource: 'device',
+                id: deviceId,
+                body: {
+                  should_be_running__release: parseInt(releaseId),
+                },
+              });
+              successCount++;
+              console.log(`Updated device ${deviceId} using Pine client fallback`);
+            } else {
+              throw individualError; // Re-throw if Pine client not available
+            }
+          } catch (pineError: any) {
+            // Both SDK and Pine client failed for this device
+            failureCount++;
+            const errorMsg = `Device ${deviceId}: ${individualError.message || 'Unknown error'}`;
+            errors.push(errorMsg);
+            console.warn(`Failed to update device ${deviceId} (both SDK and Pine failed):`, individualError, pineError);
+          }
+        }
+      }
+      
+      if (successCount === 0) {
+        // All devices failed
+        throw new Error(`Failed to deploy release to any device. Errors: ${errors.join('; ')}`);
+      } else if (failureCount > 0) {
+        // Some succeeded, some failed
+        console.warn(`Deployed release ${releaseId} to ${successCount}/${deviceIds.length} devices. ${failureCount} failed.`);
+        // Still return success but log the partial failure
+      } else {
+        console.log(`Deployed release ${releaseId} to ${successCount} devices in application ${applicationId} (individual)`);
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

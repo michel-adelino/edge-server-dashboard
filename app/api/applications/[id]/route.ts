@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedSdk, getApiUrl } from '../../../../lib/balena/sdk-auth';
+import { getAuthenticatedSdk } from '../../../../lib/balena/sdk-auth';
 
 export async function GET(
   request: NextRequest,
@@ -22,162 +22,89 @@ export async function GET(
 
     // Get authenticated SDK instance
     const balena = await getAuthenticatedSdk();
-    const apiUrl = getApiUrl();
 
-    // Get application details
-    const app = await balena.models.application.get(parseInt(applicationId));
+    // Get application details - include should_be_running__release to know current target
+    const app = await balena.models.application.get(parseInt(applicationId), {
+      $select: ['id', 'app_name', 'slug', 'is_for__device_type', 'should_be_running__release', 'created_at', 'modified_at'],
+      $expand: {
+        is_for__device_type: {
+          $select: ['name', 'slug'],
+        },
+        should_be_running__release: {
+          $select: ['id', 'commit', 'release_version'],
+        },
+      },
+    });
     
-    // Get devices for this application
-    const devices = await balena.models.device.getAllByApplication(parseInt(applicationId));
+    // Get the current target release ID from application
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentTargetReleaseId = (app as any).should_be_running__release?.id || 
+                                   (app as any).should_be_running__release?.__id || 
+                                   null;
     
-    // Get releases for this application
+    // Get devices for this application - include their target release info
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let devices: any[] = [];
+    try {
+      devices = await balena.models.device.getAllByApplication(parseInt(applicationId), {
+        $select: ['id', 'device_name', 'uuid', 'is_online', 'last_connectivity_event', 'modified_at', 'should_be_running__release'],
+      });
+      console.log(`Fetched ${devices.length} devices for application ${applicationId}`);
+    } catch (deviceError) {
+      console.warn('Failed to fetch devices (non-critical):', deviceError);
+      // Continue without device data - don't fail the entire request
+      devices = [];
+    }
+    
+    // Count how many devices are targeting each release
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const releaseDeviceCounts = new Map<number, number>();
+    devices.forEach((device: any) => {
+      const deviceTargetReleaseId = device.should_be_running__release?.id || 
+                                    device.should_be_running__release?.__id || 
+                                    null;
+      if (deviceTargetReleaseId) {
+        releaseDeviceCounts.set(deviceTargetReleaseId, (releaseDeviceCounts.get(deviceTargetReleaseId) || 0) + 1);
+      }
+    });
+    
+    // Get releases for this application - use SDK method
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let releases: any[] = [];
     try {
-      const result = await balena.request.send({
-        method: 'GET',
-        url: `${apiUrl}/v7/release?$filter=belongs_to__application/id eq ${applicationId}&$orderby=created_at desc&$expand=belongs_to__application`,
+      releases = await balena.models.release.getAllByApplication(parseInt(applicationId));
+      // Sort by created_at descending (newest first)
+      releases = releases.sort((a: any, b: any) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA; // Descending order
       });
-      
-      // Handle different response formats from balena.request.send()
-      // The response might be the data directly, or a response object
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let resultData: any = result;
-      
-      // Debug: Log the raw response structure
-      if (result && typeof result === 'object') {
-        console.log('Raw release response keys:', Object.keys(result));
-        console.log('Raw release response type:', typeof result);
-        // Check if it's a response wrapper with statusCode
-        if ('statusCode' in result) {
-          console.log('Response statusCode:', result.statusCode);
-          // If statusCode indicates success (200-299), the body should be in the response
-          // balena.request.send() typically returns the parsed body directly, but let's check
-        }
-      }
-      
-      // Check if result is a response object with body/data property
-      if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-        // Check for common response object properties
-        if ('body' in resultData && resultData.body !== undefined) {
-          resultData = resultData.body;
-          console.log('Found body property, extracted:', typeof resultData, Array.isArray(resultData));
-          if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-            console.log('Body keys:', Object.keys(resultData));
-          }
-        } else if ('data' in resultData && resultData.data !== undefined) {
-          resultData = resultData.data;
-          console.log('Found data property, extracted:', typeof resultData, Array.isArray(resultData));
-        } else if ('response' in resultData && resultData.response !== undefined) {
-          resultData = resultData.response;
-          console.log('Found response property, extracted:', typeof resultData, Array.isArray(resultData));
-        } else if ('request' in resultData && resultData.request !== undefined) {
-          // Sometimes the data might be nested in request object
-          const requestObj = resultData.request;
-          if (requestObj && typeof requestObj === 'object') {
-            if ('body' in requestObj) resultData = requestObj.body;
-            else if ('data' in requestObj) resultData = requestObj.data;
-          }
-        }
-      }
-      
-      // Handle OData response formats
-      if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-        if ('d' in resultData) {
-          // OData v2 format: { d: { results: [...] } } or { d: [...] }
-          if (Array.isArray(resultData.d)) {
-            resultData = resultData.d;
-            console.log('Found d as array, extracted', resultData.length, 'items');
-          } else if (resultData.d && Array.isArray(resultData.d.results)) {
-            resultData = resultData.d.results;
-            console.log('Found d.results as array, extracted', resultData.length, 'items');
-          } else if (resultData.d && typeof resultData.d === 'object') {
-            // Try to find array in d object
-            console.log('d object keys:', Object.keys(resultData.d));
-            const dKeys = Object.keys(resultData.d);
-            for (const key of dKeys) {
-              if (Array.isArray(resultData.d[key])) {
-                resultData = resultData.d[key];
-                console.log(`Found d.${key} as array, extracted`, resultData.length, 'items');
-                break;
-              }
-            }
-          }
-        } else if ('value' in resultData && Array.isArray(resultData.value)) {
-          // OData v4 format
-          resultData = resultData.value;
-          console.log('Found value as array, extracted', resultData.length, 'items');
-        } else if (Array.isArray(resultData)) {
-          // Already an array
-          console.log('ResultData is already an array:', resultData.length, 'items');
-        } else {
-          // Try to find array in nested structure
-          const keys = Object.keys(resultData);
-          console.log('Searching for array in keys:', keys);
-          for (const key of keys) {
-            if (key !== 'request' && Array.isArray(resultData[key])) {
-              resultData = resultData[key];
-              console.log(`Found ${key} as array, extracted`, resultData.length, 'items');
-              break;
-            }
-          }
-        }
-      } else if (Array.isArray(resultData)) {
-        console.log('ResultData is already an array:', resultData.length, 'items');
-      }
-      
-      releases = Array.isArray(resultData) ? resultData : [];
       console.log(`Fetched ${releases.length} releases for application ${applicationId}`);
-      
-      // Debug: Log response structure if releases are empty but we got a response
-      if (releases.length === 0 && result) {
-        console.log('Releases array is empty, but response received.');
-        console.log('Response structure:', {
-          keys: Object.keys(result),
-          hasBody: 'body' in result,
-          hasData: 'data' in result,
-          hasResponse: 'response' in result,
-          hasRequest: 'request' in result,
-          resultType: typeof result,
-          isArray: Array.isArray(result),
-        });
-        // Log a sample of the response (first level only to avoid huge logs)
-        if (result && typeof result === 'object') {
-          const sample: any = {};
-          Object.keys(result).slice(0, 5).forEach(key => {
-            const val = (result as any)[key];
-            sample[key] = Array.isArray(val) ? `[Array(${val.length})]` : typeof val;
-          });
-          console.log('Response sample:', sample);
-        }
-      }
     } catch (releaseError) {
       console.error('Failed to fetch releases:', releaseError);
       // Don't fail the entire request if releases fail, but log the error
     }
 
-    // Get environment variables
+    // Get environment variables - with retry logic for socket errors
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let envVars: any[] = [];
     try {
       envVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
-    } catch (envError) {
-      console.warn('Failed to fetch env vars:', envError);
+      console.log(`Fetched ${envVars.length} env vars for application ${applicationId}`);
+    } catch (envError: any) {
+      console.error('Failed to fetch env vars:', envError);
+      // Continue without env vars - don't fail the entire request
     }
 
-    // Get tags - use direct API call
+    // Get tags - use SDK method
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let tags: any[] = [];
     try {
-      const tagsResult = await balena.request.send({
-        method: 'GET',
-        url: `${apiUrl}/v6/application_tag?$filter=belongs_to__application/id eq ${applicationId}`,
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tagsData = tagsResult as { d?: any[] } | any[];
-      tags = 'd' in tagsData && tagsData.d ? tagsData.d : (Array.isArray(tagsData) ? tagsData : []);
+      tags = await balena.models.application.tags.getAllByApplication(parseInt(applicationId));
+      console.log(`Fetched ${tags.length} tags for application ${applicationId}`);
     } catch (tagError) {
-      console.warn('Failed to fetch tags:', tagError);
+      console.error('Failed to fetch tags:', tagError);
+      // Continue without tags - don't fail the entire request
     }
 
     // Transform the data
@@ -193,6 +120,7 @@ export async function GET(
       try {
         // Handle various field name possibilities from Balena API
         const releaseId = r.id || r.release_id || '';
+        const releaseIdNum = parseInt(String(releaseId));
         const commit = r.commit || r.commit_hash || '';
         const createdAt = r.created_at || r.createdAt || r.__metadata?.created_at || new Date().toISOString();
         const status = r.status || r.release_status || 'success'; // Default to 'success' if not specified
@@ -228,6 +156,10 @@ export async function GET(
         // Ensure isFinal is a boolean
         const isFinal = Boolean(r.is_final || r.is_finalized || r.finalized || false);
         
+        // Check if this is the currently deployed release
+        const isDeployed = currentTargetReleaseId !== null && releaseIdNum === currentTargetReleaseId;
+        const deployedDeviceCount = releaseDeviceCounts.get(releaseIdNum) || 0;
+        
         // Ensure all values are primitives
         const transformed = {
           id: releaseId ? String(releaseId) : '',
@@ -236,6 +168,8 @@ export async function GET(
           status: String(status),
           version: String(version),
           isFinal: isFinal,
+          isDeployed: isDeployed,
+          deployedDeviceCount: deployedDeviceCount,
         };
         
         // Validate that no object values slipped through
@@ -258,6 +192,8 @@ export async function GET(
           status: 'unknown',
           version: '0.0.0',
           isFinal: false,
+          isDeployed: false,
+          deployedDeviceCount: 0,
         };
       }
     });

@@ -23,22 +23,39 @@ export async function GET(
     const balena = await getAuthenticatedSdk();
     const apiUrl = getApiUrl();
 
-    // Get environment variables
-    const envVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
+    // Get environment variables - with retry logic for socket errors
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let envVars: any[] = [];
+    try {
+      envVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
+      console.log(`Fetched ${envVars.length} env vars for application ${applicationId}`);
+    } catch (envError: any) {
+      console.warn('Failed to fetch env vars using SDK, trying direct API:', envError);
+      // Fallback to direct API call if SDK fails
+      try {
+        const envResult = await balena.request.send({
+          method: 'GET',
+          url: `${apiUrl}/v7/application_environment_variable?$orderby=name asc&$filter=belongs_to__application eq ${applicationId}`,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const envData = envResult as { d?: any[] } | any[];
+        envVars = 'd' in envData && envData.d ? envData.d : (Array.isArray(envData) ? envData : []);
+        console.log(`Fetched ${envVars.length} env vars using direct API for application ${applicationId}`);
+      } catch (directApiError) {
+        console.error('Failed to fetch env vars using direct API:', directApiError);
+        // Return empty array so tags can still be returned
+      }
+    }
     
-    // Get tags - use direct API call
+    // Get tags - use SDK method
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let tags: any[] = [];
     try {
-      const tagsResult = await balena.request.send({
-        method: 'GET',
-        url: `${apiUrl}/v6/application_tag?$filter=belongs_to__application/id eq ${applicationId}`,
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tagsData = tagsResult as { d?: any[] } | any[];
-      tags = 'd' in tagsData && tagsData.d ? tagsData.d : (Array.isArray(tagsData) ? tagsData : []);
+      tags = await balena.models.application.tags.getAllByApplication(parseInt(applicationId));
+      console.log(`Fetched ${tags.length} tags for application ${applicationId}`);
     } catch (tagError) {
-      console.warn('Failed to fetch tags:', tagError);
+      console.error('Failed to fetch tags:', tagError);
+      // Don't throw - return empty array so other data can still be returned
     }
 
     return NextResponse.json({
@@ -84,58 +101,39 @@ export async function PUT(
     }
 
     const balena = await getAuthenticatedSdk();
-    const apiUrl = getApiUrl();
 
-    // Update environment variables
+    // Update environment variables - use SDK methods
     if (envVars) {
       for (const envVar of envVars) {
-        if (envVar.id) {
-          // Update existing - use direct API call since SDK doesn't have update method
-          await balena.request.send({
-            method: 'PATCH',
-            url: `${apiUrl}/v6/application_environment_variable(${envVar.id})`,
-            body: {
-              value: envVar.value,
-            },
-          });
-        } else {
-          // Create new - use direct API call
-          await balena.request.send({
-            method: 'POST',
-            url: `${apiUrl}/v6/application_environment_variable`,
-            body: {
-              belongs_to__application: parseInt(applicationId),
-              name: envVar.name,
-              value: envVar.value,
-            },
-          });
+        try {
+          // SDK set() method creates if doesn't exist, updates if it does
+          await balena.models.application.envVar.set(
+            parseInt(applicationId),
+            envVar.name,
+            envVar.value
+          );
+          console.log(`Successfully set env var: ${envVar.name}`);
+        } catch (envVarError: any) {
+          console.error(`Failed to set env var ${envVar.name}:`, envVarError);
+          throw new Error(`Failed to set environment variable "${envVar.name}": ${envVarError.message || 'Unknown error'}`);
         }
       }
     }
 
-    // Update tags
+    // Update tags - use SDK methods
     if (tags) {
       for (const tag of tags) {
-        if (tag.id) {
-          // Update existing - use direct API call since SDK doesn't have update method
-          await balena.request.send({
-            method: 'PATCH',
-            url: `${apiUrl}/v6/application_tag(${tag.id})`,
-            body: {
-              value: tag.value,
-            },
-          });
-        } else {
-          // Create new - use direct API call
-          await balena.request.send({
-            method: 'POST',
-            url: `${apiUrl}/v6/application_tag`,
-            body: {
-              belongs_to__application: parseInt(applicationId),
-              tag_key: tag.key,
-              value: tag.value,
-            },
-          });
+        try {
+          // SDK set() method creates if doesn't exist, updates if it does
+          await balena.models.application.tags.set(
+            parseInt(applicationId),
+            tag.key,
+            tag.value
+          );
+          console.log(`Successfully set tag: ${tag.key}`);
+        } catch (tagError: any) {
+          console.error(`Failed to set tag ${tag.key}:`, tagError);
+          throw new Error(`Failed to set tag "${tag.key}": ${tagError.message || 'Unknown error'}`);
         }
       }
     }
@@ -145,6 +143,81 @@ export async function PUT(
     console.error('Update config error:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Failed to update configuration';
+    
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const applicationId = params.id;
+    const body = await request.json();
+    const { envVarIds, tagIds } = body;
+    
+    if (!applicationId) {
+      return NextResponse.json(
+        { error: 'Application ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const balena = await getAuthenticatedSdk();
+
+    // Delete environment variables - use SDK method (requires key, not ID)
+    if (envVarIds && Array.isArray(envVarIds)) {
+      // Fetch all env vars to map IDs to names
+      const allEnvVars = await balena.models.application.envVar.getAllByApplication(parseInt(applicationId));
+      const envVarMap = new Map(allEnvVars.map((ev: any) => [ev.id.toString(), ev.name]));
+      
+      for (const envVarId of envVarIds) {
+        const envVarName = envVarMap.get(envVarId);
+        if (!envVarName) {
+          console.warn(`Env var with ID ${envVarId} not found, skipping deletion`);
+          continue;
+        }
+        try {
+          await balena.models.application.envVar.remove(parseInt(applicationId), envVarName);
+          console.log(`Successfully removed env var: ${envVarName} (ID: ${envVarId})`);
+        } catch (envVarError) {
+          console.warn(`Failed to delete env var ${envVarName} (ID: ${envVarId}):`, envVarError);
+          // Continue with other deletions even if one fails
+        }
+      }
+    }
+
+    // Delete tags - use SDK method (requires key, not ID)
+    if (tagIds && Array.isArray(tagIds)) {
+      // Fetch all tags to map IDs to keys
+      const allTags = await balena.models.application.tags.getAllByApplication(parseInt(applicationId));
+      const tagMap = new Map(allTags.map((t: any) => [t.id.toString(), t.tag_key]));
+      
+      for (const tagId of tagIds) {
+        const tagKey = tagMap.get(tagId);
+        if (!tagKey) {
+          console.warn(`Tag with ID ${tagId} not found, skipping deletion`);
+          continue;
+        }
+        try {
+          await balena.models.application.tags.remove(parseInt(applicationId), tagKey);
+          console.log(`Successfully removed tag: ${tagKey} (ID: ${tagId})`);
+        } catch (tagError) {
+          console.warn(`Failed to delete tag ${tagKey} (ID: ${tagId}):`, tagError);
+          // Continue with other deletions even if one fails
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    console.error('Delete config error:', error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Failed to delete configuration';
     
     return NextResponse.json(
       { error: errorMessage },

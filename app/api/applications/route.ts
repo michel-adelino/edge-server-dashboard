@@ -24,7 +24,6 @@ export async function GET(request: NextRequest) {
       // Get all applications using SDK
       applications = await balena.models.application.getAll({});
       console.log(`SDK fetched ${applications.length} applications`);
-      console.log(`applications`, applications);
 
       // Get devices - try to get all devices per application
       try {
