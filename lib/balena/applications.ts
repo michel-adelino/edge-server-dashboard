@@ -33,13 +33,13 @@ export async function getApplications(filters?: ApplicationFilters): Promise<App
     },
     credentials: 'include', // Include cookies for authentication
   });
-
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error || 'Failed to fetch applications');
   }
-
+  
   const applications = await response.json();
+  console.log("applications response", applications);
   return applications as Application[];
 }
 
